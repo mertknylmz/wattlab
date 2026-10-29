@@ -7,3 +7,6 @@ __pycache__/
 *.pyc
 AGENTS.md
 PROJECT_CONTEXT.md
+.wattlab/
+RUST_PLAN.md
+**/target/
