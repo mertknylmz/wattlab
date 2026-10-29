@@ -7,3 +7,5 @@ pub(super) use health_response::HealthResponse;
 pub(super) use session::{SessionResponse, StartSessionRequest};
 mod events;
 pub(super) use events::{Accepted, Batch, ConnectionDto, MeasurementDto};
+mod live;
+pub(super) use live::LiveResponse;

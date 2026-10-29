@@ -5,7 +5,7 @@ Local Rust backend using Axum, Tokio and SQLx/PostgreSQL. The package/binary is
 
 Implemented: validated local Bearer authentication, status endpoints, session
 create/read/finish, embedded SQL migrations, parameterized SQL and graceful shutdown.
-Telemetry/connection-event ingestion is implemented. Live streaming and a frontend are pending.
+Telemetry/connection-event ingestion is implemented. A local browser dashboard is implemented with one-second HTTP polling; SSE is not implemented.
 
 ## Structure
 
@@ -80,6 +80,8 @@ readiness check. Ctrl+C and Ubuntu SIGTERM request graceful shutdown and pool cl
 |---|---|
 | GET /health | Public process liveness |
 | GET /api/v1/status | Authenticated process liveness |
+| GET /api/v1/live | Latest session and fresh display metrics |
+| GET /api/v1/sessions/{id}/live | A specific session live projection |
 | POST /api/v1/sessions | Create or retrieve by request_id |
 | GET /api/v1/sessions/{id} | Read a persisted session |
 | POST /api/v1/sessions/{id}/finish | Finish idempotently |
@@ -161,30 +163,150 @@ cargo test --locked
 cargo test --locked --test postgres -- --ignored
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
+# Optional frontend behavior checks, Node.js 18+ (not needed to run the app):
+node tests/web.cjs
 ```
 
-31 unit/application/architecture/HTTP tests pass without PostgreSQL. Fourteen PostgreSQL tests are explicitly
+37 unit/application/architecture/HTTP tests pass without PostgreSQL. Seventeen PostgreSQL tests are explicitly
 ignored by default; the integration command runs them using WATTLAB_TEST_DB_URL,
 WATTLAB_TEST_DB_USER and WATTLAB_TEST_DB_PASSWORD. Test database names must end in
 `_rust_test`; tests never fall back to development settings. Integration tests create
 UUID-scoped fixture rows without truncating or resetting the database.
 
-All fourteen integration tests passed, covering session/event persistence,
+All seventeen integration tests passed, covering session/event persistence,
 concurrent replay/conflict/finish races, batch rollback, post-finish retries,
 404 behavior, and defensive database constraints. Real loopback HTTP create/read/finish and SIGTERM shutdown
 also passed. The unchanged Python sender delivered two measurements and three
 connection events to the local Rust API, then finished its session. Legacy Flyway startup refusal was exercised; earlier Java databases'
 row counts and migration history remained unchanged. No trainer was contacted.
 
-## Next step
+## Local dashboard
 
-A user-authorized real D500 → Python → Rust → PostgreSQL check also passed:
-274 measurements and four connection events were persisted, all 278 events were
-acknowledged without sender drops, and session finish/controlled shutdown succeeded.
-Observed values changed while pedaling; measurement calibration and physical
-reconnection were not tested in this run. No trainer control commands were sent.
+Start the database/API as above, then open http://127.0.0.1:8080/ (or your configured
+API port). Rust embeds the HTML/CSS/JavaScript in its binary: no Node, frontend
+build step, CDN, external fonts or internet connection is needed at runtime.
+Source assets are in `web/`; restart/rebuild the API after editing them.
 
-Next add a small local live view. SSE, metric freshness and display-power source
-selection still need design/implementation. Durable client buffering, trainer
-control commands and cloud sync are not implemented.
-The old Java sources remain only in ignored .wattlab/archives/java-api-before-rust.
+Enter the local `WATTLAB_API_TOKEN` from ignored root `.env` into the masked access
+field. It is sent only as an Authorization header to the same origin; it is not
+embedded in HTML, placed in URLs, persisted in browser storage, or logged. Reload
+or disconnect clears it. The public page/assets contain no private data; all live
+data endpoints retain Bearer authentication. CSP restricts scripts/styles/requests
+to the local origin and responses disable caching.
+
+The dashboard shows power, cadence, speed, session duration/state, and a graph of
+power samples observed by this tab over the last 60 seconds. Every successful
+HTTP reply is captured immediately, including a zero just before session finish;
+the render timer does not manufacture additional measurements. It automatically
+follows the most recently started session. No session yet is an explicit empty
+state. A finished session stays visible as the latest summary with live values
+hidden. There is no trainer/session start/stop control; the existing Python sender
+still owns creating and finishing its session. “Ekran bağlantısını kes” disconnects
+only the viewing tab.
+
+Run the Python listener separately when you want actual trainer readings:
+
+```bash
+# Only when explicitly ready for trainer access; close other trainer clients.
+.venv/bin/python experiments/bluetooth/live_trainer.py
+```
+
+Its `WATTLAB_API_URL` must point at this API and its token must match. Without a
+running sender the dashboard correctly shows waiting/stale/completed state. For
+an explicitly synthetic, hardware-free check of a running API use
+`scripts/smoke_telemetry.py`; it finishes quickly, so the live values may already
+be cleared when you look. There is no permanent demo/random-data mode in the UI.
+
+### Live projection and freshness
+
+The API returns `session`, `connection_state`, `fresh`, `speed_kmh`, `cadence_rpm`,
+`power_w`, `power_source`, per-source receipt times and `captured_at`. Session and
+metrics are read using one PostgreSQL statement/MVCC snapshot. A specific missing
+session returns 404; the automatic view with no sessions returns 200 with null
+session/metrics and fresh=false. SQL/model details stay in the outbound adapter;
+domain code applies display freshness and source preference.
+
+Migration 3 adds server-side receipt times and read indexes. Existing rows retain
+null receipt times rather than appearing newly live during migration. Exact
+replays never change receipt time. The current stream is the one whose first
+connection event was received most recently; within that stream, sequence chooses
+the latest connection event and per-source measurement. Only that connection's
+measurements can be shown. Late packets from an older connection/stream do not
+restore its values, and lower-sequence arrival does not replace a newer sample.
+This is a single-user, latest-session view; there is no multi-trainer selector.
+
+Metrics require an active session, last connection state streaming, and receipt
+age between zero and five seconds. This is a display freshness threshold, not a
+BLE disconnect detector. Fresh Cycling Power is preferred for power; fresh FTMS
+is the fallback. Speed/cadence use the latest FTMS packet. Null fields remain
+missing; older packets are not carried forward to fill them. Both raw sources
+remain independently stored. Stale fields display an em dash; a real zero stays
+zero. The browser also ages each source locally between replies, clears values
+on API failure, aborts requests after three seconds, and retries without overlap.
+Wrong auth returns the user to the access form rather than retrying indefinitely.
+The UI cannot distinguish a stopped producer from a quiet radio solely by receipt
+age; waiting indicates that limitation rather than asserting Bluetooth is connected.
+
+### Verification and continuation
+
+37 Rust unit/application/architecture/HTTP tests, 17 PostgreSQL tests and twelve
+Node frontend behavior tests pass. Tests cover source preference, missing/zero,
+stale/future receipts, concurrent lifecycle, delayed packets, stream/connection
+isolation, auth, API outages and late replies. Actual browser checks at desktop
+and narrow widths verified authentication, changing synthetic values, graph
+rendering, and completion/clearing. No trainer was accessed during UI development.
+A user-authorized real D500 → Python → Rust → PostgreSQL → browser check also
+passed: changing metrics and the graph were visible, 309 measurements/four
+connection events were persisted, all 313 events were delivered without drops,
+and completion cleared live values. No control commands were sent; calibration
+and physical reconnection were not tested in this run.
+
+The browser/trainer integration is now functionally verified. SSE, durable client buffering, trainer control commands, desktop/mobile
+packaging and cloud sync remain out of scope. The previous Java source remains
+only in ignored .wattlab/archives/java-api-before-rust.
+
+### Coasting to zero versus an interrupted stream
+
+Actual 0 W samples are drawn at zero and remain connected to earlier samples.
+Missing/stale data, API errors, stopped listening and session completion leave a
+gap or end the trace; they never imply measured zero. A caption identifies these
+states. In the first real dashboard test, the last 12 recorded samples were still
+67–82 W when the test shut down; there was no final measured zero to draw. A later
+real coast-down check should keep listening after pedaling stops until zero is
+actually observed. One-second polling can miss a very short transient entirely
+between HTTP replies; exact event history/replay is not implemented.
+
+### FTP and power-zone colors
+
+The user explicitly selected a default display FTP of 200 W. The dashboard can
+override it with an integer 1–2000 W for this tab, or reset to 200 W. Refresh resets
+the setting; user profiles/persistent FTP are still planned. The default is labeled
+as a reference, not a measured personal FTP. It does not change trainer resistance.
+
+Power-card values and graph segments use Z1–Z6 gray/blue/green/yellow/orange/red.
+Zero is neutral Z0; missing, stale and negative readings are not assigned a zone.
+Explicit percentage intervals are (0,60), [60,76), [76,90), [90,105), [105,119),
+and [119,infinity), inspired by [Zwift's zone colors](https://support.zwift.com/es/using-the-heads-up-display-when-cycling-rJepA4beS).
+Changing the display FTP recolors the visible history without modifying watts;
+missing-data gaps remain gaps. The chart uses each segment's ending sample color.
+Text labels/percentages supplement color.
+
+### One-command local startup
+
+See [the local run guide](../docs/LOCAL_RUN.md). From the repository root:
+
+```bash
+.venv/bin/python scripts/run_local.py --offline
+# Explicitly enable read-only trainer access:
+.venv/bin/python scripts/run_local.py --offline --trainer
+```
+
+The default starts only the dedicated database, API and browser. Startup waits for
+authenticated API readiness, refuses an occupied port/another launcher, and never
+kills another API process. Ctrl+C/SIGTERM stops owned children in reverse order so
+the sender can drain/finish before the API closes (up to 30 seconds per child).
+PostgreSQL remains running. `--no-browser` prints the URL instead of opening it.
+Tests: `python -m unittest discover -s scripts/tests -v` covers owned process cleanup,
+forced shutdown of a stuck child, readiness and the default setup boundary.
+The launcher was exercised with actual local DB/API startup and clean Ctrl+C
+shutdown, without BLE. The explicit trainer option still needs a hardware run.

@@ -71,4 +71,10 @@ impl SessionRepository for PgSessionRepository {
     ) -> RepositoryFuture<'_, usize> {
         Box::pin(super::event_storage::connections(&self.pool, id, batch))
     }
+    fn live_snapshot(
+        &self,
+        session_id: Option<Uuid>,
+    ) -> RepositoryFuture<'_, Option<crate::domain::live::LiveSnapshot>> {
+        Box::pin(super::live_storage::snapshot(&self.pool, session_id))
+    }
 }

@@ -35,7 +35,7 @@ These tests cover disconnect/reconnect, stale callbacks, capabilities, partial s
 
 The active backend project is Rust/Axum in [wattlab-api](wattlab-api/README.md). Open wattlab-api/Cargo.toml in RustRover. Application naming is language-neutral.
 
-Current Rust implementation provides public process health, protected API status, validated local Bearer authentication, persisted session create/read/finish using SQLx/PostgreSQL, configuration and graceful shutdown. Atomic telemetry and connection-event ingestion is implemented; the existing Python sender was verified against Rust using synthetic events. Live streaming/frontend are still pending. The previous Java source is preserved only in the ignored local archive .wattlab/archives/java-api-before-rust. Existing database data is unchanged.
+Current Rust implementation provides public process health, protected API status, validated local Bearer authentication, persisted session create/read/finish using SQLx/PostgreSQL, configuration and graceful shutdown. Atomic telemetry and connection-event ingestion is implemented; the existing Python sender was verified against Rust using synthetic events. A local browser dashboard now shows live metrics, connection/session state and a recent power graph using one-second polling. SSE is not implemented. The previous Java source is preserved only in the ignored local archive .wattlab/archives/java-api-before-rust. Existing database data is unchanged.
 
 From the repository root:
 
@@ -68,3 +68,23 @@ The existing development cluster is managed by the helper below; it does not alt
 The helper provisions separate wattlab_rust_dev and wattlab_rust_test databases for Rust and preserves earlier Java/Flyway data. PostgreSQL URLs replace known helper-created JDBC settings in local .env. Use scripts/smoke_sessions.py to check the running session API without Bluetooth. Use scripts/smoke_telemetry.py to send two synthetic measurements and three connection events and finish the session without Bluetooth. See wattlab-api/README.md for the contract and opt-in integration tests.
 
 Rust backend tek crate içinde hexagonal yapı kullanır: domain ve uygulama portları merkezde, HTTP ve PostgreSQL adaptörleri dış katmandadır. Yapı ve test ayrıntıları için [API rehberi](wattlab-api/README.md).
+
+## Yerel canlı ekran
+
+API çalışırken http://127.0.0.1:8080/ adresini aç. Maskeli alana yerel `.env` içindeki
+API anahtarını gir; anahtar yalnızca sekme belleğinde tutulur. Node veya ayrı bir
+frontend kurulumu gerekmez. Python göndericisi çalışınca ölçümler otomatik görünür;
+eski/eksik ölçümler sıfır yerine çizgiyle gösterilir. Ekran trainer'ı başlatmaz veya
+kontrol komutu göndermez. Ayrıntılar ve testler API rehberindedir.
+
+## Tek komutla yerelde başlat
+
+```bash
+.venv/bin/python scripts/run_local.py --offline
+# Cihaz erişimini açıkça etkinleştirmek için:
+.venv/bin/python scripts/run_local.py --offline --trainer
+```
+
+Varsayılan komut trainer'a bağlanmaz. Başlatma, kapatma, FTP ayarı ve sorun giderme
+adımları [yerel kullanım rehberinde](docs/LOCAL_RUN.md). 200 W varsayılan FTP yalnızca
+görüntüleme referansıdır; ekran ayarından sekme boyunca değiştirilebilir.

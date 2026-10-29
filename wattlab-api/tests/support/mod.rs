@@ -47,6 +47,12 @@ impl SessionRepository for StubRepository {
     ) -> RepositoryFuture<'_, usize> {
         Box::pin(ready(self.failure.map_or(Ok(batch.events().len()), Err)))
     }
+    fn live_snapshot(
+        &self,
+        _session_id: Option<Uuid>,
+    ) -> RepositoryFuture<'_, Option<wattlab_api::domain::live::LiveSnapshot>> {
+        Box::pin(ready(self.failure.map_or(Ok(None), Err)))
+    }
 }
 
 pub fn unavailable_repository() -> Arc<dyn SessionRepository> {

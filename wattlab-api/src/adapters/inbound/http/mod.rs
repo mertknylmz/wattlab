@@ -3,7 +3,9 @@ mod dto;
 mod error;
 mod events;
 mod health;
+mod live;
 mod sessions;
+mod web;
 
 use crate::{application::session_service::SessionService, auth::ApiToken};
 use axum::{
@@ -16,6 +18,8 @@ use error::ApiError;
 pub fn router(token: ApiToken, service: SessionService) -> Router {
     let api = Router::new()
         .route("/status", get(health::check))
+        .route("/live", get(live::snapshot))
+        .route("/sessions/{id}/live", get(live::session_snapshot))
         .route("/sessions", post(sessions::start))
         .route("/sessions/{id}", get(sessions::get))
         .route("/sessions/{id}/finish", post(sessions::finish))
@@ -28,6 +32,9 @@ pub fn router(token: ApiToken, service: SessionService) -> Router {
         .with_state(service)
         .layer(middleware::from_fn_with_state(token, auth::require_token));
     Router::new()
+        .route("/", get(web::index))
+        .route("/app.js", get(web::script))
+        .route("/styles.css", get(web::style))
         .route("/health", get(health::check))
         .nest("/api/v1", api)
         .fallback(not_found)

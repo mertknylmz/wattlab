@@ -30,4 +30,9 @@ pub trait SessionRepository: Send + Sync {
         id: Uuid,
         batch: EventBatch<ConnectionEvent>,
     ) -> RepositoryFuture<'_, usize>;
+    /// Latest session and its current stream/connection, from one consistent read.
+    fn live_snapshot(
+        &self,
+        session_id: Option<Uuid>,
+    ) -> RepositoryFuture<'_, Option<crate::domain::live::LiveSnapshot>>;
 }

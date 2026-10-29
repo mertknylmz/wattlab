@@ -509,3 +509,225 @@ async fn event_schema_constraints_reject_invalid_rows_without_changing_recorded_
     assert_eq!(event_count(&pool, id, "connection-events").await, 1);
     pool.close().await;
 }
+
+async fn live_view(app: Router, id: &str) -> Value {
+    let (status, value) = call(app, "GET", &format!("/api/v1/sessions/{id}/live"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    value
+}
+#[tokio::test]
+#[ignore = "Requires isolated PostgreSQL"]
+async fn live_projection_selects_sources_expires_metrics_and_clears_finished_sessions() {
+    let (app, pool) = setup().await;
+    let session = start(app.clone(), Uuid::new_v4()).await;
+    let id = session["id"].as_str().unwrap();
+    let uuid = Uuid::parse_str(id).unwrap();
+    let mut connection = wire_event("connection-events");
+    let mut ftms = wire_event("telemetry");
+    ftms["stream_id"] = connection["stream_id"].clone();
+    ftms["connection_id"] = connection["connection_id"].clone();
+    ftms["sequence"] = json!(1);
+    assert_eq!(
+        submit(
+            app.clone(),
+            id,
+            "connection-events",
+            vec![connection.clone()]
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        submit(app.clone(), id, "telemetry", vec![ftms.clone()])
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let view = live_view(app.clone(), id).await;
+    assert_eq!(view["power_source"], "ftms");
+    assert_eq!(view["power_w"], -123);
+    assert_eq!(view["speed_kmh"].as_f64(), Some(0.0));
+    assert!(view["cadence_rpm"].is_null());
+    let mut cycling = ftms.clone();
+    cycling["sequence"] = json!(2);
+    cycling["source"] = json!("cycling_power");
+    cycling["speed_kmh"] = Value::Null;
+    cycling["power_w"] = json!(180);
+    assert_eq!(
+        submit(app.clone(), id, "telemetry", vec![cycling]).await.0,
+        StatusCode::OK
+    );
+    let view = live_view(app.clone(), id).await;
+    assert_eq!(view["power_source"], "cycling_power");
+    assert_eq!(view["power_w"], 180);
+    sqlx::query("UPDATE telemetry_event SET received_at=clock_timestamp()-interval '6 seconds' WHERE session_id=$1 AND source='cycling_power'").bind(uuid).execute(&pool).await.unwrap();
+    assert_eq!(live_view(app.clone(), id).await["power_source"], "ftms");
+    // Replaying does not refresh server receipt time.
+    sqlx::query("UPDATE telemetry_event SET received_at=clock_timestamp()-interval '6 seconds' WHERE session_id=$1").bind(uuid).execute(&pool).await.unwrap();
+    assert_eq!(
+        submit(app.clone(), id, "telemetry", vec![ftms]).await.0,
+        StatusCode::OK
+    );
+    let view = live_view(app.clone(), id).await;
+    assert_eq!(view["fresh"], false);
+    assert!(view["power_w"].is_null());
+    connection["state"] = json!("stopped");
+    connection["sequence"] = json!(3);
+    assert_eq!(
+        submit(app.clone(), id, "connection-events", vec![connection])
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        live_view(app.clone(), id).await["connection_state"],
+        "stopped"
+    );
+    assert_eq!(
+        call(
+            app.clone(),
+            "POST",
+            &format!("/api/v1/sessions/{id}/finish"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let view = live_view(app.clone(), id).await;
+    assert!(!view["session"]["finished_at"].is_null());
+    assert_eq!(view["fresh"], false);
+    pool.close().await;
+}
+#[tokio::test]
+#[ignore = "Requires isolated PostgreSQL"]
+async fn live_projection_never_reuses_an_old_connection_or_reorders_by_arrival() {
+    let (app, pool) = setup().await;
+    let session = start(app.clone(), Uuid::new_v4()).await;
+    let id = session["id"].as_str().unwrap();
+    let mut connection = wire_event("connection-events");
+    let mut data = wire_event("telemetry");
+    data["stream_id"] = connection["stream_id"].clone();
+    data["connection_id"] = connection["connection_id"].clone();
+    data["sequence"] = json!(1);
+    assert_eq!(
+        submit(
+            app.clone(),
+            id,
+            "connection-events",
+            vec![connection.clone()]
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        submit(app.clone(), id, "telemetry", vec![data.clone()])
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let old_connection = connection["connection_id"].clone();
+    connection["connection_id"] = json!(Uuid::new_v4());
+    connection["sequence"] = json!(10);
+    assert_eq!(
+        submit(
+            app.clone(),
+            id,
+            "connection-events",
+            vec![connection.clone()]
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let view = live_view(app.clone(), id).await;
+    assert_eq!(view["fresh"], false);
+    assert!(view["power_w"].is_null());
+    data["connection_id"] = connection["connection_id"].clone();
+    data["sequence"] = json!(11);
+    data["power_w"] = json!(150);
+    assert_eq!(
+        submit(app.clone(), id, "telemetry", vec![data.clone()])
+            .await
+            .0,
+        StatusCode::OK
+    );
+    data["sequence"] = json!(9);
+    data["power_w"] = json!(50);
+    assert_eq!(
+        submit(app.clone(), id, "telemetry", vec![data]).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(live_view(app.clone(), id).await["power_w"], 150);
+    // A delayed earlier connection event cannot override the higher sequence.
+    let mut delayed = connection.clone();
+    delayed["connection_id"] = old_connection;
+    delayed["sequence"] = json!(5);
+    delayed["state"] = json!("retry_wait");
+    assert_eq!(
+        submit(app.clone(), id, "connection-events", vec![delayed])
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        live_view(app.clone(), id).await["connection_state"],
+        "streaming"
+    );
+    // A new stream starts low; an even later packet from the old stream must not win.
+    let new_stream = wire_event("connection-events");
+    assert_eq!(
+        submit(app.clone(), id, "connection-events", vec![new_stream])
+            .await
+            .0,
+        StatusCode::OK
+    );
+    connection["sequence"] = json!(20);
+    assert_eq!(
+        submit(app.clone(), id, "connection-events", vec![connection])
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let view = live_view(app.clone(), id).await;
+    assert_eq!(view["fresh"], false);
+    assert!(view["power_w"].is_null());
+    pool.close().await;
+}
+#[tokio::test]
+#[ignore = "Requires isolated PostgreSQL"]
+async fn live_projection_ignores_events_without_receipt_times_and_reports_missing_sessions() {
+    let (app, pool) = setup().await;
+    let session = start(app.clone(), Uuid::new_v4()).await;
+    let id = session["id"].as_str().unwrap();
+    let uuid = Uuid::parse_str(id).unwrap();
+    let connection = wire_event("connection-events");
+    assert_eq!(
+        submit(app.clone(), id, "connection-events", vec![connection])
+            .await
+            .0,
+        StatusCode::OK
+    );
+    sqlx::query("UPDATE connection_event SET received_at=NULL WHERE session_id=$1")
+        .bind(uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let view = live_view(app.clone(), id).await;
+    assert!(view["connection_state"].is_null());
+    assert_eq!(view["fresh"], false);
+    assert_eq!(
+        call(
+            app,
+            "GET",
+            &format!("/api/v1/sessions/{}/live", Uuid::new_v4()),
+            None
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    pool.close().await;
+}

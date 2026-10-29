@@ -45,4 +45,18 @@ impl SessionService {
     ) -> Result<usize, ApplicationError> {
         Ok(self.repository.ingest_connections(id, batch).await?)
     }
+    pub async fn live(
+        &self,
+    ) -> Result<Option<crate::domain::live::LiveSnapshot>, ApplicationError> {
+        Ok(self.repository.live_snapshot(None).await?)
+    }
+    pub async fn live_session(
+        &self,
+        id: Uuid,
+    ) -> Result<crate::domain::live::LiveSnapshot, ApplicationError> {
+        self.repository
+            .live_snapshot(Some(id))
+            .await?
+            .ok_or(ApplicationError::SessionNotFound)
+    }
 }
