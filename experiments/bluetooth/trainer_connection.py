@@ -55,6 +55,7 @@ def telemetry_characteristics(services):
 class TrainerConnection:
     def __init__(self, address, client_factory, handlers, *, settings=None,
                  retry_errors=(OSError, TimeoutError), on_state=None,
+                 on_ready=None, on_lost=None,
                  clock=time.monotonic, sleep=asyncio.sleep):
         self.clock = clock
         self.sleep = sleep
@@ -66,6 +67,10 @@ class TrainerConnection:
         self.settings = settings or ConnectionSettings()
         self.retry_errors = retry_errors
         self.on_state = on_state or (lambda state: None)
+        # on_ready(client) may subscribe extra characteristics (e.g. a control
+        # point) and returns them so this owner cleans them up with the rest.
+        self.on_ready = on_ready
+        self.on_lost = on_lost or (lambda: None)
         self._stop = asyncio.Event()
         self._running = False
         self._generation = 0
@@ -114,6 +119,12 @@ class TrainerConnection:
 
                 await asyncio.wait_for(client.start_notify(char, receive), self.settings.timeout)
                 subscribed.append(char)
+            if self.on_ready is not None:
+                try:
+                    subscribed.extend(await asyncio.wait_for(self.on_ready(client), self.settings.timeout))
+                except (OSError, TimeoutError, ValueError, RuntimeError) as exc:
+                    # Optional capabilities must not block read-only telemetry.
+                    log.warning("Optional trainer setup failed (%s)", type(exc).__name__)
             if disconnected.is_set() or not client.is_connected:
                 raise ConnectionError("Disconnected during setup")
             self._stream_started = self.clock()
@@ -124,6 +135,7 @@ class TrainerConnection:
             self._stable = (self._stream_started is not None and
                             self.clock() - self._stream_started >= self.settings.stable_after)
             self._generation += 1  # Ignore callbacks from the previous connection.
+            self.on_lost()
             cleanup = asyncio.create_task(self._cleanup(client, subscribed))
             try:
                 await asyncio.shield(cleanup)

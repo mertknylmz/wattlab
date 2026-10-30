@@ -15,16 +15,22 @@ class PermanentDeliveryError(RuntimeError):
     pass
 
 
+def validate_local_api(base_url, token):
+    """Only a credential-free loopback origin may receive the local token."""
+    parsed = urlsplit(base_url)
+    if (parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1")
+            or parsed.username or parsed.password or parsed.query or parsed.fragment
+            or parsed.path not in ("", "/")):
+        raise ValueError("API URL must be an HTTP loopback origin without credentials")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{32,64}", token):
+        raise ValueError("API token must contain 32 to 64 URL-safe characters")
+    return base_url.rstrip('/')
+
+
 class TelemetrySender:
     def __init__(self, base_url, token, *, capacity=512, max_retries=4,
                  retry_delay=1.0, timeout=2.0, shutdown_timeout=5.0):
-        parsed = urlsplit(base_url)
-        if (parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1")
-                or parsed.username or parsed.password or parsed.query or parsed.fragment
-                or parsed.path not in ("", "/")):
-            raise ValueError("API URL must be an HTTP loopback origin without credentials")
-        if not re.fullmatch(r"[A-Za-z0-9_-]{32,64}", token):
-            raise ValueError("API token must contain 32 to 64 URL-safe characters")
+        validate_local_api(base_url, token)
         if (type(capacity) is not int or capacity < 1 or type(max_retries) is not int or max_retries < 0
                 or any(not math.isfinite(value) or value <= 0
                        for value in (retry_delay, timeout, shutdown_timeout))):
@@ -54,6 +60,17 @@ class TelemetrySender:
         )
         self._accepting = True
         self._task = asyncio.create_task(self._worker())
+
+    async def ensure_session(self):
+        """Create the session now instead of on the first event, so a session
+        started before the trainer streams is still visible."""
+        if self.session_id is None:
+            result = await self._request('/api/v1/sessions', {"request_id": self.request_id})
+            try:
+                self.session_id = str(UUID(result['id']))
+            except (KeyError, TypeError, ValueError, AttributeError) as exc:
+                raise PermanentDeliveryError("API returned an invalid session") from exc
+        return self.session_id
 
     def enqueue(self, kind, event):
         if event is None:
@@ -99,13 +116,8 @@ class TelemetrySender:
                 if self.failed:
                     self.dropped += 1
                     continue
-                if self.session_id is None:
-                    result = await self._request('/api/v1/sessions', {"request_id": self.request_id})
-                    # Validate before using a server value in an endpoint path.
-                    try:
-                        self.session_id = str(UUID(result['id']))
-                    except (KeyError, TypeError, ValueError, AttributeError) as exc:
-                        raise PermanentDeliveryError("API returned an invalid session") from exc
+                # The server value is validated before it is used in a path.
+                await self.ensure_session()
                 result = await self._request(f'/api/v1/sessions/{self.session_id}/{kind}', {"events": [event]})
                 if not isinstance(result, dict) or result.get('accepted') != 1:
                     raise PermanentDeliveryError("API did not acknowledge the event")

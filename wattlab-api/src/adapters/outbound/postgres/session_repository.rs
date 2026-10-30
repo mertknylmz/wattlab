@@ -20,7 +20,8 @@ impl SessionRepository for PgSessionRepository {
     fn start_or_get(&self, request_id: Uuid) -> RepositoryFuture<'_, Session> {
         Box::pin(async move {
             let row: SessionRow = sqlx::query_as(
-                "INSERT INTO training_session (id, request_id) VALUES ($1, $2) \
+                "INSERT INTO training_session (id, request_id, ftp_w) \
+                VALUES ($1, $2, (SELECT ftp_w FROM athlete_settings WHERE id = 1)) \
                 ON CONFLICT (request_id) DO UPDATE SET request_id = EXCLUDED.request_id \
                 RETURNING id, request_id, started_at, finished_at",
             )

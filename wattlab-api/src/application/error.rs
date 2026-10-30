@@ -7,6 +7,8 @@ pub enum ApplicationError {
     EventConflict,
     StorageUnavailable,
     StorageFailure,
+    CommandNotFound,
+    CommandConflict,
 }
 
 impl From<RepositoryError> for ApplicationError {
@@ -27,6 +29,8 @@ impl fmt::Display for ApplicationError {
             Self::SessionNotFound => "Session not found",
             Self::StorageUnavailable => "Session storage unavailable",
             Self::StorageFailure => "Session storage operation failed",
+            Self::CommandNotFound => "Command not found",
+            Self::CommandConflict => "Command is no longer awaiting this result",
         })
     }
 }

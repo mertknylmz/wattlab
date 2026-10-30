@@ -1,7 +1,10 @@
+pub mod command;
 pub mod connection_state;
 pub mod error;
 pub mod event_error;
 pub mod events;
+pub mod history;
 pub mod live;
 pub mod session;
+pub mod settings;
 pub mod source;

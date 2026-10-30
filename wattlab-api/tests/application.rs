@@ -36,6 +36,7 @@ async fn repository_failures_are_mapped_without_driver_types() {
         let service = SessionService::new(Arc::new(StubRepository {
             session: None,
             failure: Some(error),
+            ..Default::default()
         }));
         assert_eq!(
             service.get(Uuid::new_v4()).await,
@@ -57,6 +58,7 @@ async fn service_returns_domain_values_through_the_port() {
     let service = SessionService::new(Arc::new(StubRepository {
         session: Some(session.clone()),
         failure: None,
+        ..Default::default()
     }));
     assert_eq!(service.start(request).await.unwrap(), session);
     assert_eq!(service.get(session.id()).await.unwrap(), session);

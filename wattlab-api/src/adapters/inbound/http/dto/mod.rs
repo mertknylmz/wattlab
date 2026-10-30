@@ -9,3 +9,12 @@ mod events;
 pub(super) use events::{Accepted, Batch, ConnectionDto, MeasurementDto};
 mod live;
 pub(super) use live::LiveResponse;
+mod agent;
+pub(super) use agent::{
+    AgentResponse, CommandRequest, CommandResponse, CommandResultRequest, HeartbeatRequest,
+    NextQuery, ResultStatus,
+};
+mod settings;
+pub(super) use settings::{SettingsResponse, UpdateSettingsRequest};
+mod history;
+pub(super) use history::{PageQuery, SeriesResponse, SessionPageResponse, SessionSummaryResponse};

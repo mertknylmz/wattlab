@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::{net::TcpListener, signal};
 use wattlab_api::{
     adapters::outbound::postgres::{DatabaseConfig, PgSessionRepository, connect_and_migrate},
-    build_router,
+    build_app,
     config::Config,
 };
 
@@ -18,15 +18,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = connect_and_migrate(&database_config).await?;
     let listener = TcpListener::bind(config.address).await?;
     tracing::info!(address = %listener.local_addr()?, "WattLab API listening");
-    let result = axum::serve(
-        listener,
-        build_router(
-            config.api_token,
-            Arc::new(PgSessionRepository::new(pool.clone())),
-        ),
-    )
-    .with_graceful_shutdown(shutdown_signal())
-    .await;
+    let app = build_app(
+        config.api_token,
+        Arc::new(PgSessionRepository::new(pool.clone())),
+    );
+    let streams = app.shutdown.clone();
+    let result = axum::serve(listener, app.router)
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            streams.trigger();
+        })
+        .await;
     pool.close().await;
     result?;
     tracing::info!("WattLab API stopped");

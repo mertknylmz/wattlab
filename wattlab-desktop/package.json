@@ -1,0 +1,34 @@
+{
+  "name": "wattlab-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "WattLab desktop shell: starts the local API and trainer agent, shows the WattLab screens.",
+  "main": "src/main.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:ui": "npm --prefix ../wattlab-ui run build",
+    "start": "npm run build:ui && electron .",
+    "test": "node --test test/",
+    "dist": "npm run build:ui && electron-builder --linux AppImage"
+  },
+  "devDependencies": {
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "dev.wattlab.desktop",
+    "productName": "WattLab",
+    "files": [
+      "src/**",
+      "renderer/**"
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    }
+  }
+}

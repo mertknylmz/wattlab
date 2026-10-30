@@ -18,7 +18,8 @@ impl From<ApplicationError> for ApiError {
     fn from(error: ApplicationError) -> Self {
         match error {
             ApplicationError::EventConflict => Self::Conflict,
-            ApplicationError::SessionNotFound => Self::NotFound,
+            ApplicationError::SessionNotFound | ApplicationError::CommandNotFound => Self::NotFound,
+            ApplicationError::CommandConflict => Self::Conflict,
             ApplicationError::StorageUnavailable => Self::Unavailable,
             ApplicationError::StorageFailure => Self::Internal,
         }

@@ -35,7 +35,7 @@ These tests cover disconnect/reconnect, stale callbacks, capabilities, partial s
 
 The active backend project is Rust/Axum in [wattlab-api](wattlab-api/README.md). Open wattlab-api/Cargo.toml in RustRover. Application naming is language-neutral.
 
-Current Rust implementation provides public process health, protected API status, validated local Bearer authentication, persisted session create/read/finish using SQLx/PostgreSQL, configuration and graceful shutdown. Atomic telemetry and connection-event ingestion is implemented; the existing Python sender was verified against Rust using synthetic events. A local browser dashboard now shows live metrics, connection/session state and a recent power graph using one-second polling. SSE is not implemented. The previous Java source is preserved only in the ignored local archive .wattlab/archives/java-api-before-rust. Existing database data is unchanged.
+Current Rust implementation provides public process health, protected API status, validated local Bearer authentication, persisted session create/read/finish using SQLx/PostgreSQL, configuration and graceful shutdown. Atomic telemetry and connection-event ingestion, an SSE live stream, session history/summary, persistent FTP and a trainer-agent command queue are implemented. The screens are React + TypeScript in [wattlab-ui](wattlab-ui/) and run only inside [wattlab-desktop](wattlab-desktop/), the Electron app that manages the local processes and forwards the screens' API requests; the API itself serves no pages. The previous Java source is preserved only in the ignored local archive .wattlab/archives/java-api-before-rust. Existing database data is unchanged.
 
 From the repository root:
 
@@ -69,22 +69,21 @@ The helper provisions separate wattlab_rust_dev and wattlab_rust_test databases 
 
 Rust backend tek crate içinde hexagonal yapı kullanır: domain ve uygulama portları merkezde, HTTP ve PostgreSQL adaptörleri dış katmandadır. Yapı ve test ayrıntıları için [API rehberi](wattlab-api/README.md).
 
-## Yerel canlı ekran
+## Masaüstü uygulaması
 
-API çalışırken http://127.0.0.1:8080/ adresini aç. Maskeli alana yerel `.env` içindeki
-API anahtarını gir; anahtar yalnızca sekme belleğinde tutulur. Node veya ayrı bir
-frontend kurulumu gerekmez. Python göndericisi çalışınca ölçümler otomatik görünür;
-eski/eksik ölçümler sıfır yerine çizgiyle gösterilir. Ekran trainer'ı başlatmaz veya
-kontrol komutu göndermez. Ayrıntılar ve testler API rehberindedir.
-
-## Tek komutla yerelde başlat
+WattLab yalnızca masaüstü uygulamasıdır; tarayıcıdan açılan ekran yoktur.
 
 ```bash
-.venv/bin/python scripts/run_local.py --offline
-# Cihaz erişimini açıkça etkinleştirmek için:
-.venv/bin/python scripts/run_local.py --offline --trainer
+cd wattlab-desktop
+npm start
 ```
 
-Varsayılan komut trainer'a bağlanmaz. Başlatma, kapatma, FTP ayarı ve sorun giderme
-adımları [yerel kullanım rehberinde](docs/LOCAL_RUN.md). 200 W varsayılan FTP yalnızca
-görüntüleme referansıdır; ekran ayarından sekme boyunca değiştirilebilir.
+Uygulama veritabanını, API'yi ve trainer ajanını (bağlanmadan) başlatır; anahtar
+girmek gerekmez. Ekranlar: canlı görünüm ve trainer paneli, oturum geçmişi/detayı,
+ayarlar. Eski/eksik ölçümler sıfır yerine çizgiyle gösterilir. Trainer komutları
+yalnızca Python trainer ajanı üzerinden gider. Ekransız geliştirme için
+`scripts/run_local.py` yalnızca DB + API (+ `--trainer` ile ajan) başlatır.
+
+Kurulum, başlatma, kapatma, FTP, ERG ve sorun giderme adımları
+[yerel kullanım rehberinde](docs/LOCAL_RUN.md). 200 W varsayılan FTP kişisel ölçüm
+değildir; Ayarlar ekranından kalıcı olarak değiştirilebilir.

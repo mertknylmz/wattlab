@@ -116,6 +116,27 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.started, [POWER])
         self.assertEqual([c.disconnects for c in self.created], [1, 1])
 
+    async def test_ready_hook_subscriptions_are_cleaned_and_failures_do_not_block_telemetry(self):
+        extra = SimpleNamespace(uuid='control', properties=['indicate'])
+        lost = []
+
+        async def ready(client):
+            return [extra]
+
+        async def broken(client):
+            raise OSError('optional capability failed')
+
+        for hook, expected_stop in ((ready, ['control', POWER, BIKE]), (broken, [POWER, BIKE])):
+            client = FakeClient()
+            manager = self.manager([client])
+            manager.on_ready, manager.on_lost = hook, lambda: lost.append(True)
+            task = asyncio.create_task(manager.run())
+            await self.ready()
+            manager.stop()
+            await asyncio.wait_for(task, .5)
+            self.assertEqual(client.stopped, expected_stop)
+        self.assertEqual(lost, [True, True])
+
     async def test_missing_characteristics_is_not_retried(self):
         client = FakeClient(chars=())
         manager = self.manager([client])

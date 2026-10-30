@@ -5,7 +5,12 @@ Local Rust backend using Axum, Tokio and SQLx/PostgreSQL. The package/binary is
 
 Implemented: validated local Bearer authentication, status endpoints, session
 create/read/finish, embedded SQL migrations, parameterized SQL and graceful shutdown.
-Telemetry/connection-event ingestion is implemented. A local browser dashboard is implemented with one-second HTTP polling; SSE is not implemented.
+Telemetry/connection-event ingestion is implemented. Session history/summary/series,
+persistent athlete settings (FTP), an in-memory trainer-agent command queue and an
+SSE live stream are implemented. The API serves no pages: the screens
+(`../wattlab-ui`) run only inside the desktop app (`../wattlab-desktop`), whose main
+process forwards their `/api` requests here with the per-launch Bearer token. A
+future mobile app will use the same HTTP/SSE contract.
 
 ## Structure
 
@@ -14,14 +19,17 @@ src/
 ├── main.rs / lib.rs        # Composition, startup and shutdown
 ├── config.rs / config/    # Validated process settings
 ├── auth.rs                # Independent token type
-├── domain/                # Session model, invariants and domain errors
+├── domain/                # Session, events, live view, history summary,
+│                          # FTP/zones, trainer commands and agent status
 ├── application/
-│   ├── session_service.rs # Use cases
+│   ├── *_service.rs       # Session, event, history, settings, command use cases
 │   ├── error.rs
-│   └── ports/             # SessionRepository and driver-free errors
+│   └── ports/             # Repository/queue ports and driver-free errors
 └── adapters/
-    ├── inbound/http/      # Routing, auth, DTOs and HTTP error mapping
-    └── outbound/postgres/ # SQLx rows, repository, pool and migrations
+    ├── inbound/http/      # Routing, auth, DTOs, SSE, shutdown, error mapping
+    └── outbound/
+        ├── postgres/      # SQLx rows, repositories, pool and migrations
+        └── memory/        # In-process trainer command queue
 ```
 
 The single-crate hexagonal design points dependencies inward: HTTP calls the
@@ -87,6 +95,31 @@ readiness check. Ctrl+C and Ubuntu SIGTERM request graceful shutdown and pool cl
 | POST /api/v1/sessions/{id}/finish | Finish idempotently |
 | POST /api/v1/sessions/{id}/telemetry | Atomically accept measurement events |
 | POST /api/v1/sessions/{id}/connection-events | Atomically accept connection events |
+| GET /api/v1/live/stream | SSE: `snapshot` event `{live, agent}` every second; `unavailable` on storage failure |
+| GET /api/v1/sessions?limit=&before= | Newest-first summaries; `limit` 1–100 (default 20), `before` is the previous page's `next_before` |
+| GET /api/v1/sessions/{id}/summary | Session, captured `ftp_w`, `zone_reference`, summary |
+| GET /api/v1/sessions/{id}/series | Summary plus per-second points `{t, power_w, power_source, cadence_rpm, speed_kmh}` |
+| GET, PUT /api/v1/settings | FTP `{ftp_w, ftp_is_default, updated_at}`; PUT `{"ftp_w": 1–2000 or null}` (null resets to 200 W) |
+| POST /api/v1/agent/commands | Queue `{kind, target_power_w?}`; 202 with the command |
+| GET /api/v1/agent/commands/{id} | Command status: pending, delivered, succeeded, rejected, expired |
+| GET /api/v1/agent/commands/next?wait_seconds= | Agent long poll (≤20 s); 204 when idle or shutting down |
+| PUT /api/v1/agent/commands/{id}/result | Agent reports `{status: succeeded/rejected, message}` |
+| GET, PUT /api/v1/agent/status | Agent heartbeat; GET reports `online` within 3 s of the last heartbeat |
+
+Command kinds: `connect`, `disconnect`, `start_session`, `finish_session`,
+`set_target_power` (0–2000 W) and `release_control`. A command is delivered once;
+undelivered commands expire after 10 s, delivered ones after 45 s without a result.
+The queue is in memory: restarting the API forgets pending commands, which is
+intended (stale hardware commands are never replayed). The API never talks to the
+trainer; the Python agent executes commands and reports their outcome.
+
+History buckets measurements per second (per-source averages; Cycling Power
+preferred for power). Averages exclude missing values and include zeros; work
+(kJ) counts only positive power. Migration 4 adds the single-row
+`athlete_settings` table (default 200 W) and `training_session.ftp_w`, captured
+when a session starts. Older sessions keep null and are summarized with the
+current FTP, reported as `zone_reference: "current"`. Graceful shutdown ends long
+polls and SSE streams first so the server can stop promptly.
 
 All /api/v1 routes and its fallback require exactly one header
 `Authorization: Bearer <token>`. Missing/wrong/duplicate headers return 401 with
@@ -163,59 +196,46 @@ cargo test --locked
 cargo test --locked --test postgres -- --ignored
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
-# Optional frontend behavior checks, Node.js 18+ (not needed to run the app):
-node tests/web.cjs
+# Screen behavior tests live with the UI source (Node.js 18.18+, build-time only):
+(cd ../wattlab-ui && npm test)
 ```
 
-37 unit/application/architecture/HTTP tests pass without PostgreSQL. Seventeen PostgreSQL tests are explicitly
+60 unit/application/architecture/HTTP tests pass without PostgreSQL. Twenty PostgreSQL tests are explicitly
 ignored by default; the integration command runs them using WATTLAB_TEST_DB_URL,
 WATTLAB_TEST_DB_USER and WATTLAB_TEST_DB_PASSWORD. Test database names must end in
 `_rust_test`; tests never fall back to development settings. Integration tests create
 UUID-scoped fixture rows without truncating or resetting the database.
 
-All seventeen integration tests passed, covering session/event persistence,
+All twenty integration tests passed, covering history bucketing/paging, FTP
+persistence and capture at session start, session/event persistence,
 concurrent replay/conflict/finish races, batch rollback, post-finish retries,
 404 behavior, and defensive database constraints. Real loopback HTTP create/read/finish and SIGTERM shutdown
 also passed. The unchanged Python sender delivered two measurements and three
 connection events to the local Rust API, then finished its session. Legacy Flyway startup refusal was exercised; earlier Java databases'
 row counts and migration history remained unchanged. No trainer was contacted.
 
-## Local dashboard
+## Desktop screens
 
-Start the database/API as above, then open http://127.0.0.1:8080/ (or your configured
-API port). Rust embeds the HTML/CSS/JavaScript in its binary: no Node, frontend
-build step, CDN, external fonts or internet connection is needed at runtime.
-Source assets are in `web/`; restart/rebuild the API after editing them.
+The API has no browser UI: `/`, `/index.html` and asset paths return 404. The
+Electron app serves the built `../wattlab-ui` files from its private
+`wattlab://app/` scheme and forwards `/api/*` from that origin to this API, adding
+`Authorization: Bearer <per-launch token>` in the main process. The screens never
+hold the token; their CSP allows connections only to their own origin. No Node,
+CDN, external fonts or internet connection is needed at runtime.
 
-Enter the local `WATTLAB_API_TOKEN` from ignored root `.env` into the masked access
-field. It is sent only as an Authorization header to the same origin; it is not
-embedded in HTML, placed in URLs, persisted in browser storage, or logged. Reload
-or disconnect clears it. The public page/assets contain no private data; all live
-data endpoints retain Bearer authentication. CSP restricts scripts/styles/requests
-to the local origin and responses disable caching.
+The live screen shows power, cadence, speed, session duration/state, and a graph of
+power samples observed by this window over the last 60 seconds. It reads the SSE
+stream through `fetch`, samples every snapshot
+immediately, including a zero just before session finish, and reconnects after
+one second if the stream ends or is silent for five seconds. The render timer
+does not manufacture measurements. It follows the most recently started session.
+History, session detail and settings screens use the endpoints above.
 
-The dashboard shows power, cadence, speed, session duration/state, and a graph of
-power samples observed by this tab over the last 60 seconds. Every successful
-HTTP reply is captured immediately, including a zero just before session finish;
-the render timer does not manufacture additional measurements. It automatically
-follows the most recently started session. No session yet is an explicit empty
-state. A finished session stays visible as the latest summary with live values
-hidden. There is no trainer/session start/stop control; the existing Python sender
-still owns creating and finishing its session. “Ekran bağlantısını kes” disconnects
-only the viewing tab.
-
-Run the Python listener separately when you want actual trainer readings:
-
-```bash
-# Only when explicitly ready for trainer access; close other trainer clients.
-.venv/bin/python experiments/bluetooth/live_trainer.py
-```
-
-Its `WATTLAB_API_URL` must point at this API and its token must match. Without a
-running sender the dashboard correctly shows waiting/stale/completed state. For
-an explicitly synthetic, hardware-free check of a running API use
-`scripts/smoke_telemetry.py`; it finishes quickly, so the live values may already
-be cleared when you look. There is no permanent demo/random-data mode in the UI.
+The trainer panel sends commands to the Python trainer agent
+(`experiments/bluetooth/trainer_agent.py`) and shows the agent's answer; it never
+assumes the trainer complied. Without a running agent the panel says so and its
+buttons stay disabled. For a synthetic, hardware-free check of a running API use
+`scripts/smoke_telemetry.py`. There is no permanent demo/random-data mode.
 
 ### Live projection and freshness
 
@@ -241,9 +261,9 @@ BLE disconnect detector. Fresh Cycling Power is preferred for power; fresh FTMS
 is the fallback. Speed/cadence use the latest FTMS packet. Null fields remain
 missing; older packets are not carried forward to fill them. Both raw sources
 remain independently stored. Stale fields display an em dash; a real zero stays
-zero. The browser also ages each source locally between replies, clears values
-on API failure, aborts requests after three seconds, and retries without overlap.
-Wrong auth returns the user to the access form rather than retrying indefinitely.
+zero. The screen also ages each source locally between snapshots, clears values
+when the stream fails, and reconnects without overlapping streams.
+A refused request (401) shows a restart message rather than retrying indefinitely.
 The UI cannot distinguish a stopped producer from a quiet radio solely by receipt
 age; waiting indicates that limitation rather than asserting Bluetooth is connected.
 
@@ -261,9 +281,14 @@ connection events were persisted, all 313 events were delivered without drops,
 and completion cleared live values. No control commands were sent; calibration
 and physical reconnection were not tested in this run.
 
-The browser/trainer integration is now functionally verified. SSE, durable client buffering, trainer control commands, desktop/mobile
-packaging and cloud sync remain out of scope. The previous Java source remains
-only in ignored .wattlab/archives/java-api-before-rust.
+That real-device run used the earlier polling screen and `live_trainer.py`. The
+React/SSE screens, history/settings and the command-driven trainer agent were
+verified with synthetic data only (30 October 2026): agent online, start/finish
+through commands, reasoned rejections (no active session, ERG unavailable), FTP
+captured at start, history listing, and ordered agent→API shutdown. The new agent,
+connecting from the screen and ERG commands still need an authorized device run.
+Durable client buffering, mobile and cloud sync remain out of scope. The previous
+Java source remains only in ignored .wattlab/archives/java-api-before-rust.
 
 ### Coasting to zero versus an interrupted stream
 
@@ -273,15 +298,16 @@ gap or end the trace; they never imply measured zero. A caption identifies these
 states. In the first real dashboard test, the last 12 recorded samples were still
 67–82 W when the test shut down; there was no final measured zero to draw. A later
 real coast-down check should keep listening after pedaling stops until zero is
-actually observed. One-second polling can miss a very short transient entirely
-between HTTP replies; exact event history/replay is not implemented.
+actually observed. One-second snapshots can miss a very short transient between
+them; the session detail chart shows the stored per-second history instead.
 
 ### FTP and power-zone colors
 
-The user explicitly selected a default display FTP of 200 W. The dashboard can
-override it with an integer 1–2000 W for this tab, or reset to 200 W. Refresh resets
-the setting; user profiles/persistent FTP are still planned. The default is labeled
-as a reference, not a measured personal FTP. It does not change trainer resistance.
+The default FTP is 200 W, labeled as a reference rather than a measured personal
+FTP. The settings screen persists an integer 1–2000 W (or resets to 200 W) through
+`/api/v1/settings`; there is a single local athlete, no multi-user profiles. FTP
+does not change trainer resistance. Sessions capture FTP at start for their zone
+distribution; the live screen uses the current FTP.
 
 Power-card values and graph segments use Z1–Z6 gray/blue/green/yellow/orange/red.
 Zero is neutral Z0; missing, stale and negative readings are not assigned a zone.
@@ -291,22 +317,24 @@ Changing the display FTP recolors the visible history without modifying watts;
 missing-data gaps remain gaps. The chart uses each segment's ending sample color.
 Text labels/percentages supplement color.
 
-### One-command local startup
+### Headless developer startup
 
-See [the local run guide](../docs/LOCAL_RUN.md). From the repository root:
+Normal use is the desktop app; see [the local run guide](../docs/LOCAL_RUN.md).
+Without screens, from the repository root:
 
 ```bash
 .venv/bin/python scripts/run_local.py --offline
-# Explicitly enable read-only trainer access:
+# Also start the trainer agent (it connects only when the screen asks):
 .venv/bin/python scripts/run_local.py --offline --trainer
 ```
 
-The default starts only the dedicated database, API and browser. Startup waits for
+The default starts only the dedicated database and API. The Electron
+shell in `../wattlab-desktop` manages the same processes with a per-launch token. Startup waits for
 authenticated API readiness, refuses an occupied port/another launcher, and never
 kills another API process. Ctrl+C/SIGTERM stops owned children in reverse order so
 the sender can drain/finish before the API closes (up to 30 seconds per child).
-PostgreSQL remains running. `--no-browser` prints the URL instead of opening it.
+PostgreSQL remains running.
 Tests: `python -m unittest discover -s scripts/tests -v` covers owned process cleanup,
 forced shutdown of a stuck child, readiness and the default setup boundary.
 The launcher was exercised with actual local DB/API startup and clean Ctrl+C
-shutdown, without BLE. The explicit trainer option still needs a hardware run.
+shutdown, without BLE. The trainer agent option still needs a hardware run.

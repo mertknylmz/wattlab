@@ -10,4 +10,6 @@ pub use database::connect_and_migrate;
 pub use session_repository::PgSessionRepository;
 pub use startup_error::DatabaseError;
 mod event_storage;
+mod history_storage;
 mod live_storage;
+mod settings_storage;

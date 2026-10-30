@@ -1,4 +1,7 @@
-"""Start the local DB/API/dashboard; BLE reading requires --trainer explicitly."""
+"""Headless developer launcher: local DB + API, optionally the trainer agent (--trainer).
+
+The screens run only in the desktop app (wattlab-desktop); this is for scripts and tests.
+"""
 import argparse
 import fcntl
 import json
@@ -13,7 +16,6 @@ import threading
 import time
 import urllib.error
 import urllib.request
-import webbrowser
 
 from dotenv import dotenv_values
 
@@ -68,8 +70,7 @@ def wait_ready(child, origin, token, stopping, timeout=15):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--trainer', action='store_true',
-                        help='Explicitly enable read-only trainer access; close other trainer apps first')
-    parser.add_argument('--no-browser', action='store_true', help='Print the URL without opening a browser')
+                        help='Start the trainer agent; it connects and controls only on screen commands. Close other trainer apps first')
     parser.add_argument('--offline', action='store_true', help='Build using cached Cargo dependencies')
     options = parser.parse_args(argv)
     stopping = threading.Event()
@@ -140,17 +141,10 @@ def main(argv=None):
         api = spawn([str(target / 'debug/wattlab-api')], env)
         wait_ready(api, origin, env['WATTLAB_API_TOKEN'], stopping)
         if options.trainer:
-            spawn([sys.executable, '-u', str(ROOT / 'experiments/bluetooth/live_trainer.py')], env)
-        print('Dashboard: ' + origin + '/', flush=True)
-        print('Enter your local API token in the masked field; it is not printed here.', flush=True)
-        print('Trainer reading enabled.' if options.trainer else 'Trainer reading disabled; use --trainer to enable it.', flush=True)
-        print('Ctrl+C stops owned processes; PostgreSQL stays available.', flush=True)
-        if not options.no_browser:
-            try:
-                if not webbrowser.open(origin + '/'):
-                    print('Open the dashboard URL manually.', flush=True)
-            except webbrowser.Error:
-                print('Open the dashboard URL manually.', flush=True)
+            spawn([sys.executable, '-u', str(ROOT / 'experiments/bluetooth/trainer_agent.py')], env)
+        print('API: ' + origin + '/api/v1 (Bearer token from local .env; not printed here).', flush=True)
+        print('Trainer agent started; it connects only on a command.' if options.trainer else 'Trainer agent disabled; use --trainer to enable it.', flush=True)
+        print('Screens run in the desktop app (wattlab-desktop). Ctrl+C stops owned processes; PostgreSQL stays available.', flush=True)
         while not stopping.wait(.3):
             if any(child.poll() is not None for child in children[-(2 if options.trainer else 1):]):
                 raise LaunchError('A running component exited; shutting down the other owned processes.')

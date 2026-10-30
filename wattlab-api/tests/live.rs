@@ -100,12 +100,8 @@ fn future_receipts_and_the_freshness_boundary_are_explicit() {
     assert!(!s.metrics().fresh);
 }
 #[tokio::test]
-async fn web_assets_are_local_public_and_never_embed_api_credentials() {
-    for (path, mime) in [
-        ("/", "text/html"),
-        ("/app.js", "text/javascript"),
-        ("/styles.css", "text/css"),
-    ] {
+async fn the_api_serves_no_browser_pages() {
+    for path in ["/", "/index.html", "/app.js", "/styles.css"] {
         let app = build_router(
             ApiToken::parse("test-only-token-for-integration-tests").unwrap(),
             support::unavailable_repository(),
@@ -114,19 +110,7 @@ async fn web_assets_are_local_public_and_never_embed_api_credentials() {
             .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(
-            response.headers()["content-type"]
-                .to_str()
-                .unwrap()
-                .starts_with(mime)
-        );
-        assert_eq!(response.headers()["cache-control"], "no-store");
-        assert!(response.headers().contains_key("content-security-policy"));
-        let bytes = response.into_body().collect().await.unwrap().to_bytes();
-        let text = std::str::from_utf8(&bytes).unwrap();
-        assert!(!text.contains("test-only-token-for-integration-tests"));
-        assert!(!text.contains("https://cdn"));
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }
 #[tokio::test]

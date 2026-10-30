@@ -47,6 +47,7 @@ async fn call(
         Arc::new(support::StubRepository {
             session: None,
             failure,
+            ..Default::default()
         }),
     );
     let mut request = Request::builder()
@@ -266,6 +267,7 @@ async fn application_passes_validated_batches_and_maps_port_conflicts() {
         let service = SessionService::new(Arc::new(support::StubRepository {
             session: None,
             failure,
+            ..Default::default()
         }));
         assert_eq!(
             service

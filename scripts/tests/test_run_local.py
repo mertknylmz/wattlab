@@ -51,7 +51,7 @@ class LauncherTests(unittest.TestCase):
     def test_plain_launch_does_not_enable_trainer(self):
         # Fail at the setup boundary: the default path must not reach BLE import/spawn.
         with tempfile.TemporaryDirectory() as tmp, patch.object(launcher, 'ROOT', Path(tmp)), patch.object(launcher.subprocess, 'Popen', side_effect=OSError('fixture')) as spawn:
-            self.assertEqual(launcher.main(['--no-browser', '--offline']), 1)
+            self.assertEqual(launcher.main(['--offline']), 1)
             self.assertEqual(spawn.call_count, 1)
             self.assertIn('local_db.py', spawn.call_args.args[0][1])
 

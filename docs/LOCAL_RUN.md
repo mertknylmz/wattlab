@@ -1,99 +1,147 @@
 # WattLab’ı yerelde çalıştırma
 
 Bu akış Ubuntu içindir. Rust toolchain, PostgreSQL araçları, proje `.venv` ortamı
-ve `requirements.txt` bağımlılıkları önceden kurulmuş olmalı. Backend Rust/Axum’dur;
-Bluetooth bağlantısı Python’da kalır. Desktop veya mobil paket kurulumu gerekmez.
+ve `requirements.txt` bağımlılıkları önceden kurulmuş olmalı. WattLab yalnızca masaüstü
+uygulamasıdır; tarayıcıdan açılan bir ekran yoktur.
 
-## Ekran ve API
+Parçalar:
 
-WattLab kök klasöründeki terminalden:
+- **Masaüstü uygulaması** (`wattlab-desktop/`, Electron): pencereyi açar, aşağıdaki
+  süreçleri başlatıp kapatır. Ekranları uygulamanın içinden gösterir.
+- **Ekranlar** (`wattlab-ui/`, React): derlenip masaüstü uygulamasının içine konur.
+- **API** (`wattlab-api/`, Rust): oturumlar, ayarlar ve PostgreSQL. Ekran sunmaz;
+  yalnızca yerel HTTP/SSE API’sidir (ileride mobil uygulama da aynı API’yi kullanır).
+- **Trainer ajanı** (Python): Bluetooth bağlantısı ve trainer komutları.
 
-```bash
-.venv/bin/python scripts/run_local.py --offline
-```
+## İlk kurulum
 
-Başlatıcı WattLab’a ait PostgreSQL’i hazırlar, Rust uygulamasını derler, API’nin
-hazır olduğunu doğrular ve tarayıcıda yerel ekranı açar. Bu komut **trainer’a bağlanmaz**.
-İlk kurulumda eksik Cargo bağımlılıkları varsa internetle bir kez `--offline` olmadan
-çalıştır; sonraki çalıştırmalarda önbellekle devam edebilirsin.
-
-Ekranın maskeli alanına kökteki yerel `.env` içindeki `WATTLAB_API_TOKEN` değerini
-gir. Anahtarı paylaşma; başlatıcı onu ekrana veya bağlantı adresine yazmaz.
-Sayfa ve canlı veri aynı yerel API’den gelir, ayrı frontend sunucusu yoktur.
-
-Tarayıcıyı kendin açmak için:
+Node 22+ gerekir (yalnızca geliştirme ve derleme için; örn. `nvm install 22`).
 
 ```bash
-.venv/bin/python scripts/run_local.py --offline --no-browser
+(cd wattlab-api && cargo build)
+(cd wattlab-ui && npm ci)
+(cd wattlab-desktop && npm ci)
 ```
 
-Varsayılan adres http://127.0.0.1:8080/; `WATTLAB_API_PORT` ile değişebilir.
-RustRover’dan API’yi zaten çalıştırdıysan başlatıcı aynı portu devralmaz. Önce
-kendi API çalıştırmanı durdur veya farklı port seç. Başlatıcı başka süreçleri kapatmaz.
-
-## Gerçek trainer ile çalıştırma
-
-Trainer açık ve erişime hazır olmalı. Zwift gibi diğer trainer istemcilerini kapat.
-Yerel `.env` içinde `TRAINER_ADDRESS` doğru olmalı. Cihaz erişimini açıkça etkinleştir:
+Ubuntu 24.04+ Chromium sandbox’ı için Electron’un yardımcı dosyasının root sahipli
+olması gerekir (her `npm ci` sonrası tekrarla):
 
 ```bash
-.venv/bin/python scripts/run_local.py --offline --trainer
+cd wattlab-desktop
+sudo chown root:root node_modules/electron/dist/chrome-sandbox
+sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
 ```
 
-Bu seçenek Python dinleyicisini API hazır olduktan sonra başlatır; geçerli yerel
-API adresini dinleyiciye süreç ayarı olarak aktarır. Kalıcı `.env` içindeki adresi
-ve anahtarı kopyalayıp başka dosyalara yazmaz. Dinleyici oturum açar ve ölçümleri
-Rust/PostgreSQL’e gönderir. Direnç/ERG kontrol komutu gönderilmez.
+## Çalıştırma
 
-Bağlantı ve veriler hazır olduğunda hafifçe pedal çevir. Pedalı bırakınca grafiğin
-sıfıra inişini gözlemek istiyorsan dinleyiciyi hemen kapatma: gerçek 0 W ölçümlerinin
-gelmesini bekle. Veri yokluğu sıfır değildir; kesinti grafikte boşluk bırakır.
+Trainer kullanacaksan trainer açık olmalı; Zwift gibi diğer trainer istemcilerini kapat.
+Yerel `.env` içinde `TRAINER_ADDRESS` doğru olmalı.
 
-## Durdurma
+```bash
+cd wattlab-desktop
+npm start
+```
 
-Başlatıcının terminalinde **Ctrl+C** kullan. Önce Python dinleyicisine kontrollü
-kapanış istenir; böylece kuyruk boşaltılabilir ve oturum API üzerinden bitirilebilir.
-Ardından API kapatılır. Her sahip olunan süreç için kapanış bütçesi 30 saniyedir;
-takılan süreç sonunda zorla sonlandırılır. Böyle bir durumda oturum bitişi garanti
-edilemez. Veritabanı geliştirmeye devam edebilmen için çalışır kalır.
+`npm start` önce ekranları derler (`wattlab-desktop/renderer/`), sonra uygulamayı açar.
+Uygulama yerel veritabanını hazırlar, API’yi boş bir yerel portta ve her açılışta yeni
+üretilen bir erişim anahtarıyla başlatır, trainer ajanını (bağlanmadan) açar ve
+pencereyi gösterir. Anahtar girmen gerekmez ve ekranlar anahtarı hiç görmez: ekranın
+API istekleri uygulamanın ana sürecinden geçer, anahtarı ana süreç ekler. `.env`
+içindeki anahtar değişmez. Ajanı başlatmamak için `WATTLAB_DESKTOP_TRAINER=0 npm start`.
+API kodunu değiştirdiysen önce `cargo build` çalıştır.
 
-PostgreSQL’i ayrıca kapatmak istersen, onu kullanan diğer çalışmaları bitirdikten sonra:
+Ekranlar: **Canlı görünüm** (anlık değerler, son 60 saniyelik güç grafiği, trainer
+kontrolleri), **Geçmiş** (kayıtlı oturumlar ve özetleri), oturum detayı (saniyelik
+güç grafiği, ortalamalar, iş/kJ, zon dağılımı) ve **Ayarlar** (FTP).
+
+## Trainer paneli
+
+Ajan başlarken trainer’a **bağlanmaz**; ekrandan komut bekler. Canlı görünümdeki
+Trainer panelinden:
+
+1. **Trainer’a bağlan** — ajan Bluetooth bağlantısını kurar ve veri kanallarına abone olur.
+2. **Oturumu başlat** — API’de yeni oturum açılır; ölçümler bu oturuma kaydedilir.
+   Oturum o anki FTP’yi saklar.
+3. Pedal çevir. Pedalı bırakınca gerçek 0 W ölçümlerinin gelmesini bekle; veri
+   yokluğu sıfır değildir, kesinti grafikte boşluk bırakır.
+4. **Oturumu bitir** — ajan bekleyen ölçümleri gönderir ve oturumu kapatır.
+5. **Bağlantıyı kes** — varsa ERG hedefi bırakılır, sonra bağlantı kapanır.
+
+Her komutun sonucu panelin altında görünür: bekleniyor, tamamlandı, gerekçeli ret
+(örneğin “aktif oturum yok”) veya zaman aşımı. Ajan çalışmıyorsa panel bunu söyler ve
+düğmeler devre dışıdır. Ekran trainer’ın komutu uyguladığını varsaymaz.
+
+### Hedef güç (ERG)
+
+Trainer bağlı ve FTMS hedef güç desteğini bildiriyorsa ERG alanı etkinleşir; trainer’ın
+bildirdiği güç aralığı gösterilir. Hedefi watt olarak girip **Uygula**’ya bas; trainer
+direnci bu güce göre ayarlar. **Direnci bırak** hedefi kaldırır. Bağlantı koparsa
+ajan kontrol durumunu unutur; yeniden bağlanınca eski hedef otomatik gönderilmez.
+ERG komutları D500 üzerinde henüz doğrulanmadı; ilk denemeyi düşük bir hedefle yap.
+
+## Kapatma
+
+Pencereyi kapat (veya terminalde Ctrl+C). Önce ajan kontrollü kapanır (aktif oturum
+bitirilir, ERG bırakılır, bağlantı kesilir), ardından API. Her biri için 30 sn bütçe
+vardır; takılan süreç sonra zorla sonlandırılır ve bu durumda oturum bitişi garanti
+edilemez. PostgreSQL çalışır kalır. Ayrıca kapatmak için, onu kullanan diğer
+çalışmaları bitirdikten sonra:
 
 ```bash
 .venv/bin/python scripts/local_db.py stop
 ```
 
-Ekrandaki “Ekran bağlantısını kes” yalnızca sekmenin izlemesini durdurur; Python
-veya trainer oturumunu kapatmaz. Tarayıcı sayfasını kapatmak da antrenmanı durdurmaz.
+## Paket
+
+`npm run dist` ekranları derleyip bir AppImage üretir. Paket henüz API binary’sini,
+Python ajanını ve PostgreSQL’i içermez; çalıştırırken `WATTLAB_ROOT` hazırlanmış WattLab
+klasörünü göstermelidir. Bu bileşenlerin paketlenmesi açık bir karardır.
+
+## Arayüzsüz geliştirici başlatıcısı
+
+Ekran olmadan yalnızca DB + API (isteğe bağlı ajan) gerektiğinde, örneğin betik veya
+`curl` ile deneme için:
+
+```bash
+.venv/bin/python scripts/run_local.py --offline            # DB + API
+.venv/bin/python scripts/run_local.py --offline --trainer  # + trainer ajanı
+```
+
+API http://127.0.0.1:8080/api/v1 adresindedir (`WATTLAB_API_PORT` ile değişir) ve
+`.env` içindeki `WATTLAB_API_TOKEN` ile Bearer kimlik doğrulaması ister. Aynı portta
+çalışan başka bir API’yi başlatıcı devralmaz veya kapatmaz. Ctrl+C sahip olduğu
+süreçleri sırayla kapatır.
 
 ## FTP ve renkli zonlar
 
-Varsayılan **200 W**, yalnızca görüntüleme için bir başlangıç referansıdır; senin
-FTP ölçümün değildir. Ekranın FTP alanından 1–2000 arasında tam sayı watt girip
-“Uygula”ya basabilirsin. “200 W’a dön” varsayılanı geri getirir. Değer bu sekmede
-kalır; sayfayı yenileyince 200 W’a döner. Kullanıcı profiline kaydetme henüz yoktur.
+FTP **Ayarlar** ekranından 1–2000 arasında tam sayı watt olarak kaydedilir ve
+PostgreSQL’de kalıcıdır. Başlangıç değeri 200 W’tır ve kişisel ölçüm değildir;
+“Varsayılana dön” bu değeri geri getirir. FTP trainer direncini değiştirmez.
 
-Güç kartı ve grafik bu FTP’ye göre renklenir; ham watt değerleri değişmez. Ayarı
-sonradan değiştirince görünür grafik geçmişi de yeni referansla yeniden renklenir.
-Sıfır watt Z0’dır; eksik/eski/negatif güç bir antrenman zonuna atanmaz. Z1–Z6
-sırasıyla gri, mavi, yeşil, sarı, turuncu ve kırmızıdır. Renk yanında metin etiketi
-ve yüzde vardır; bilgi yalnızca renkle verilmez.
+Her yeni oturum başladığı andaki FTP’yi saklar; oturum detayındaki zon dağılımı bu
+değere göredir, sonradan FTP değiştirmek eski oturumları değiştirmez. FTP’si
+kaydedilmemiş eski oturumlar güncel FTP ile gösterilir ve bu belirtilir. Canlı
+grafik ve güç kartı güncel FTP ile renklenir; ham watt değişmez.
 
-Kesintisiz yüzde sınırları: Z1 `(0,60)`, Z2 `[60,76)`, Z3 `[76,90)`,
-Z4 `[90,105)`, Z5 `[105,119)`, Z6 `[119,∞)`. Bunlar uygulamanın açık sınırlarıdır;
-[Zwift’in güç zonu renklerinden](https://support.zwift.com/es/using-the-heads-up-display-when-cycling-rJepA4beS)
-esinlenir. FTP ayarı trainer direncini değiştirmez.
+Sıfır watt Z0’dır; eksik/eski/negatif güç bir zona atanmaz. Z1–Z6 sırasıyla gri,
+mavi, yeşil, sarı, turuncu ve kırmızıdır; renk yanında metin etiketi ve yüzde vardır.
+Yüzde sınırları: Z1 `(0,60)`, Z2 `[60,76)`, Z3 `[76,90)`, Z4 `[90,105)`,
+Z5 `[105,119)`, Z6 `[119,∞)`; [Zwift’in güç zonu renklerinden](https://support.zwift.com/es/using-the-heads-up-display-when-cycling-rJepA4beS)
+esinlenir.
 
 ## Kontroller ve mevcut sınırlar
 
 ```bash
-node wattlab-api/tests/web.cjs
+(cd wattlab-ui && npm test)
+(cd wattlab-desktop && npm test)
+(cd experiments/bluetooth && ../../.venv/bin/python -m unittest discover -s tests)
 .venv/bin/python -m unittest discover -s scripts/tests -v
+.venv/bin/python scripts/run_api.py --test --offline
+.venv/bin/python scripts/run_api.py --integration --offline
 ```
 
-Node yalnızca arayüz davranış testleri için gereklidir, uygulamayı çalıştırmak için
-gerekmez. Başlatıcının DB/API açılışı ve güvenli kapanışı gerçek yerel ortamda,
-zonların davranışı sentetik verilerle tarayıcıda doğrulandı. Yeni başlatıcının
-`--trainer` akışı bu aşamada gerçek cihazla ayrıca denenmedi; mevcut ayrı Python →
-Rust → web akışı daha önce D500 üzerinde doğrulanmıştı. Kullanıcı profili, kalıcı FTP,
-masaüstü/mobil paketleme ve trainer donanım kontrolü henüz uygulanmadı.
+Sentetik veriyle doğrulananlar: API + trainer ajanı komut akışı (oturum başlat/bitir,
+gerekçeli retler, sıralı kapanış), masaüstü uygulamasında canlı akış, ayarlar ve
+açılış/kapanış. Gerçek trainer ile yeni ajan, uygulamadan bağlanma, gerçek 0 W duruşu
+ve ERG komutları henüz denenmedi; bunlar ayrıca onaylanan cihaz testi gerektirir.
+Mobil uygulama ve bileşenleri içeren tam masaüstü paketi yoktur.

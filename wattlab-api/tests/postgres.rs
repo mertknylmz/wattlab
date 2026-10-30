@@ -731,3 +731,180 @@ async fn live_projection_ignores_events_without_receipt_times_and_reports_missin
     );
     pool.close().await;
 }
+
+fn measurement(
+    stream: Uuid,
+    sequence: i64,
+    at: &str,
+    source: &str,
+    power: Value,
+    cadence: Value,
+) -> Value {
+    json!({"schema_version":1,"stream_id":stream,"connection_id":stream,"sequence":sequence,
+        "observed_at":at,"source":source,"power_w":power,"cadence_rpm":cadence,
+        "speed_kmh": if source == "ftms" { json!(30.0) } else { Value::Null }})
+}
+
+#[tokio::test]
+#[ignore = "Requires isolated PostgreSQL"]
+async fn history_buckets_seconds_prefers_cycling_power_and_summarizes() {
+    let (app, pool) = setup().await;
+    let session = start(app.clone(), Uuid::new_v4()).await;
+    let id = session["id"].as_str().unwrap();
+    let stream = Uuid::new_v4();
+    let events = vec![
+        measurement(
+            stream,
+            0,
+            "2026-10-30T10:00:00.100Z",
+            "ftms",
+            json!(100),
+            json!(80.0),
+        ),
+        measurement(
+            stream,
+            1,
+            "2026-10-30T10:00:00.600Z",
+            "ftms",
+            json!(120),
+            json!(90.0),
+        ),
+        measurement(
+            stream,
+            2,
+            "2026-10-30T10:00:00.700Z",
+            "cycling_power",
+            json!(130),
+            Value::Null,
+        ),
+        measurement(
+            stream,
+            3,
+            "2026-10-30T10:00:01.200Z",
+            "ftms",
+            json!(0),
+            Value::Null,
+        ),
+    ];
+    assert_eq!(
+        submit(app.clone(), id, "telemetry", events).await.0,
+        StatusCode::OK
+    );
+    call(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/sessions/{id}/finish"),
+        None,
+    )
+    .await;
+    let (status, series) = call(
+        app.clone(),
+        "GET",
+        &format!("/api/v1/sessions/{id}/series"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let points = series["points"].as_array().unwrap();
+    assert_eq!(points.len(), 2);
+    assert_eq!(points[0]["power_w"], 130);
+    assert_eq!(points[0]["power_source"], "cycling_power");
+    assert_eq!(points[0]["cadence_rpm"], 85.0);
+    assert_eq!(points[1]["power_w"], 0);
+    assert!(points[1]["cadence_rpm"].is_null());
+    let summary = &series["summary"];
+    assert_eq!(summary["average_power_w"], 65.0);
+    assert_eq!(summary["max_power_w"], 130);
+    assert_eq!(summary["energy_kj"], 0.13);
+    assert_eq!(summary["power_seconds"], 2);
+    assert!(
+        series["ftp_w"].is_i64(),
+        "new sessions capture the current FTP"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+#[ignore = "Requires isolated PostgreSQL"]
+async fn history_pages_newest_first_with_a_stable_cursor() {
+    let (app, pool) = setup().await;
+    let older = start(app.clone(), Uuid::new_v4()).await;
+    let newer = start(app.clone(), Uuid::new_v4()).await;
+    let (status, page) = call(app.clone(), "GET", "/api/v1/sessions?limit=100", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let ids: Vec<&str> = page["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["session"]["id"].as_str().unwrap())
+        .collect();
+    let position = |v: &Value| {
+        ids.iter()
+            .position(|id| *id == v["id"].as_str().unwrap())
+            .unwrap()
+    };
+    assert!(position(&newer) < position(&older));
+    let empty = page["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["session"]["id"] == newer["id"])
+        .unwrap();
+    assert_eq!(empty["summary"]["recorded_seconds"], 0);
+    assert!(empty["summary"]["average_power_w"].is_null());
+    let (_, next) = call(
+        app.clone(),
+        "GET",
+        &format!(
+            "/api/v1/sessions?limit=100&before={}",
+            newer["id"].as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    for s in next["sessions"].as_array().unwrap() {
+        assert_ne!(s["session"]["id"], newer["id"]);
+        assert!(
+            s["session"]["started_at"].as_str().unwrap() <= newer["started_at"].as_str().unwrap()
+        );
+    }
+    let (_, unknown) = call(
+        app,
+        "GET",
+        &format!("/api/v1/sessions?before={}", Uuid::new_v4()),
+        None,
+    )
+    .await;
+    assert_eq!(unknown["sessions"], json!([]));
+    pool.close().await;
+}
+
+#[tokio::test]
+#[ignore = "Requires isolated PostgreSQL"]
+async fn ftp_setting_persists_and_is_captured_only_by_later_sessions() {
+    let (app, pool) = setup().await;
+    let put = |body: Value| call(app.clone(), "PUT", "/api/v1/settings", Some(body));
+    let earlier = start(app.clone(), Uuid::new_v4()).await;
+    let (status, saved) = put(json!({"ftp_w": 275})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["ftp_is_default"], false);
+    assert_eq!(
+        call(app.clone(), "GET", "/api/v1/settings", None).await.1["ftp_w"],
+        275
+    );
+    let later = start(app.clone(), Uuid::new_v4()).await;
+    let summary = |id: &Value| {
+        let path = format!("/api/v1/sessions/{}/summary", id.as_str().unwrap());
+        let app = app.clone();
+        async move { call(app, "GET", &path, None).await }
+    };
+    assert_eq!(summary(&later["id"]).await.1["ftp_w"], 275);
+    assert_ne!(summary(&earlier["id"]).await.1["ftp_w"], 275);
+    assert_eq!(put(json!({"ftp_w": 0})).await.0, StatusCode::BAD_REQUEST);
+    let (_, reset) = put(json!({"ftp_w": null})).await;
+    assert_eq!(
+        (reset["ftp_w"].clone(), reset["ftp_is_default"].clone()),
+        (json!(200), json!(true))
+    );
+    pool.close().await;
+}
