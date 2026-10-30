@@ -7,8 +7,10 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ftms_control import (CONTROL_POINT, FEATURE, POWER_RANGE, ControlRejected, FtmsControl,
-                          ControlUnavailable, encode_target_power, parse_features,
-                          parse_power_range, parse_response)
+                          ControlUnavailable, encode_resistance_level, encode_simulation,
+                          encode_target_power, parse_features, parse_power_range, parse_response)
+
+FREE_RIDE = [b"\x00", b"\x01", b"\x00", encode_simulation()]
 
 
 def features(power_target=True):
@@ -61,6 +63,8 @@ class ParserTests(unittest.TestCase):
                 parse_power_range(raw)
 
     def test_target_encoding_and_response_parsing(self):
+        self.assertEqual(encode_simulation(), b"\x11\x00\x00\x00\x00(\x33")
+        self.assertEqual(encode_resistance_level(0), b"\x04\x00")
         self.assertEqual(encode_target_power(250), b"\x05\xfa\x00")
         self.assertEqual(encode_target_power(-1), b"\x05\xff\xff")
         for invalid in (True, 2.5, 40000):
@@ -87,12 +91,14 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
         control = FtmsControl(client)
         self.assertEqual(len(await control.setup()), 1)
         self.assertEqual(control.power_range.max_w, 1000)
+        self.assertEqual(client.writes, FREE_RIDE, "setup leaves ERG for free-ride")
+        self.assertIsNone(control.target_w)
         await control.set_target_power(200)
         await control.set_target_power(210)
-        self.assertEqual(client.writes, [b"\x00", b"\x05\xc8\x00", b"\x05\xd2\x00"])
+        self.assertEqual(client.writes, [*FREE_RIDE, b"\x05\xc8\x00", b"\x05\xd2\x00"])
         self.assertEqual(control.target_w, 210)
         await control.release()
-        self.assertEqual(client.writes[-1], b"\x01")
+        self.assertEqual(client.writes[-3:], [b"\x01", b"\x00", encode_simulation()])
         self.assertIsNone(control.target_w)
 
     async def test_out_of_range_targets_are_rejected_before_writing(self):
@@ -101,10 +107,10 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
         await control.setup()
         with self.assertRaises(ValueError):
             await control.set_target_power(1001)
-        self.assertEqual(client.writes, [])
+        self.assertEqual(client.writes, FREE_RIDE)
 
     async def test_trainer_rejection_and_silence_are_reported(self):
-        control = FtmsControl(ControlClient(results=[0x05]))
+        control = FtmsControl(ControlClient(results=[0x01, 0x01, 0x01, 0x01, 0x05]))
         await control.setup()
         with self.assertRaises(ControlRejected) as caught:
             await control.set_target_power(150)
@@ -115,6 +121,13 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TimeoutError):
             await silent.set_target_power(150)
         self.assertIsNone(silent.target_w)
+
+    async def test_setup_uses_resistance_level_when_simulation_is_unsupported(self):
+        client = ControlClient(results=[0x01, 0x01, 0x01, 0x02, 0x01])
+        control = FtmsControl(client)
+        self.assertEqual(len(await control.setup()), 1)
+        self.assertEqual(client.writes, [b"\x00", b"\x01", b"\x00", encode_simulation(), encode_resistance_level(0)])
+        self.assertIsNone(control.target_w)
 
 
 if __name__ == "__main__":

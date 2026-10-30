@@ -1,8 +1,9 @@
 """FTMS Control Point: capability discovery, target power (ERG) and release.
 
 Pure encoders/decoders are separate from FtmsControl, which owns one connected
-client's control point. A new connection always starts without control and
-without a target; nothing is re-sent after a reconnect.
+client's control point. After subscribe, setup requests control, RESET, then indoor-bike
+simulation at 0% (or resistance level 0) so leftover ERG is not inherited.
+Control is kept so the trainer stays in free-ride until the rider sets a target.
 """
 import asyncio
 import logging
@@ -15,7 +16,9 @@ CONTROL_POINT = "00002ad9-0000-1000-8000-00805f9b34fb"
 
 REQUEST_CONTROL = 0x00
 RESET = 0x01
+SET_RESISTANCE = 0x04
 SET_TARGET_POWER = 0x05
+SET_SIMULATION = 0x11
 RESPONSE_CODE = 0x80
 POWER_TARGET_SUPPORTED = 1 << 3  # Target Setting Features, FTMS 4.3.1.2
 
@@ -71,6 +74,25 @@ def encode_target_power(watts):
     return struct.pack("<Bh", SET_TARGET_POWER, watts)
 
 
+def encode_simulation(grade_percent=0.0, wind_ms=0.0, crr=0.004, cw=0.51):
+    """Indoor Bike Simulation Parameters: 0% grade is free ride, not ERG."""
+    wind = int(round(wind_ms / 0.001))
+    grade = int(round(grade_percent / 0.01))
+    crr_u = int(round(crr / 0.0001))
+    cw_u = int(round(cw / 0.01))
+    if not -32768 <= wind <= 32767 or not -32768 <= grade <= 32767:
+        raise ValueError("Simulation wind/grade is out of range")
+    if not 0 <= crr_u <= 255 or not 0 <= cw_u <= 255:
+        raise ValueError("Simulation crr/cw is out of range")
+    return struct.pack("<BhhBB", SET_SIMULATION, wind, grade, crr_u, cw_u)
+
+
+def encode_resistance_level(tenths):
+    if isinstance(tenths, bool) or not isinstance(tenths, int) or not 0 <= tenths <= 255:
+        raise ValueError("Resistance level must be 0–255 tenths")
+    return struct.pack("<BB", SET_RESISTANCE, tenths)
+
+
 def parse_response(data):
     """Return (request_opcode, result_name) from a control point indication."""
     if len(data) < 3 or data[0] != RESPONSE_CODE:
@@ -112,7 +134,37 @@ class FtmsControl:
         await self.client.start_notify(char, self._indication)
         self._char = char
         self.erg_supported = True
+        await self._enter_free_ride()
         return [char]
+
+    async def _request_control(self):
+        await self._send(bytes([REQUEST_CONTROL]))
+        self._has_control = True
+
+    async def _enter_open_mode(self):
+        """Leave ERG. Simulation 0% keeps cassette gears; resistance 0 is fallback."""
+        try:
+            await self._send(encode_simulation())
+            log.info("Trainer in free-ride (simulation 0%)")
+            return
+        except ControlRejected as exc:
+            if exc.reason != "op_code_not_supported":
+                raise
+        await self._send(encode_resistance_level(0))
+        log.info("Trainer in free-ride (resistance level 0)")
+
+    async def _enter_free_ride(self):
+        """A new link must not inherit ERG. RESET alone is not enough on D500."""
+        try:
+            async with self._lock:
+                await self._request_control()
+                await self._send(bytes([RESET]))
+                await self._request_control()
+                await self._enter_open_mode()
+        except (ControlRejected, TimeoutError, OSError) as exc:
+            log.warning("Could not enter free-ride (%s)", type(exc).__name__)
+            self._has_control = False
+        self.target_w = None
 
     def _indication(self, _sender, data):
         try:
@@ -155,14 +207,15 @@ class FtmsControl:
             self.target_w = watts
 
     async def release(self):
-        """Reset returns the trainer to its default resistance and ends control."""
+        """Leave ERG and put the trainer back in free-ride, keeping control."""
         async with self._lock:
-            if not self._has_control:
-                self.target_w = None
-                return
             try:
+                if not self._has_control:
+                    await self._request_control()
                 await self._send(bytes([RESET]))
-            finally:
-                # Even if the trainer did not confirm, never claim control afterwards.
+                await self._request_control()
+                await self._enter_open_mode()
+            except (ControlRejected, TimeoutError, OSError, ControlUnavailable) as exc:
+                log.warning("Could not return to free-ride (%s)", type(exc).__name__)
                 self._has_control = False
-                self.target_w = None
+            self.target_w = None

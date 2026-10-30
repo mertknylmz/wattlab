@@ -39,10 +39,15 @@ describe('ApiClient', () => {
   it('sends target power only with the ERG command', async () => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(json({})));
     const client = new ApiClient(fetcher);
-    await client.submit('set_target_power', 180);
+    await client.submit('set_target_power', { targetPowerW: 180 });
+    await client.submit('connect', { address: 'AA:BB:CC:DD:EE:FF' });
     await client.submit('start_session');
     expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ kind: 'set_target_power', target_power_w: 180 });
-    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({ kind: 'start_session' });
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({
+      kind: 'connect',
+      address: 'AA:BB:CC:DD:EE:FF',
+    });
+    expect(JSON.parse(fetcher.mock.calls[2][1].body)).toEqual({ kind: 'start_session' });
   });
 });
 

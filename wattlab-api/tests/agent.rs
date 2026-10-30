@@ -123,6 +123,8 @@ async fn invalid_commands_and_unknown_ids_are_rejected() {
     let member = support::member_token(&app).await;
     for body in [
         json!({"kind":"explode"}),
+        json!({"kind":"connect"}),
+        json!({"kind":"connect","address":"trainer"}),
         json!({"kind":"set_target_power"}),
         json!({"kind":"set_target_power","target_power_w":2001}),
     ] {
@@ -185,6 +187,8 @@ async fn heartbeat_is_validated_and_reported_while_fresh() {
     assert_eq!(after["online"], true);
     assert_eq!(after["connection_state"], "streaming");
     assert_eq!(after["power_range_w"], json!([0, 1500]));
+    assert_eq!(after["devices"], json!([]));
+    assert!(after["trainer_address"].is_null());
     for invalid in [
         json!({"agent_id":Uuid::new_v4(),"connection_state":"dancing","session_id":null,"erg_supported":false,"power_range_w":null,"target_power_w":null}),
         json!({"agent_id":Uuid::new_v4(),"connection_state":"idle","session_id":null,"erg_supported":false,"power_range_w":[500,100],"target_power_w":null}),
@@ -196,6 +200,52 @@ async fn heartbeat_is_validated_and_reported_while_fresh() {
             StatusCode::BAD_REQUEST
         );
     }
+}
+
+#[tokio::test]
+async fn connect_carries_the_selected_address_and_scan_results_ride_on_status() {
+    let app = app().router;
+    let member = support::member_token(&app).await;
+    let (status, command) = call(
+        &app,
+        &member,
+        "POST",
+        "/api/v1/agent/commands",
+        Some(json!({"kind":"connect","address":"aa-bb-cc-dd-ee-ff"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(command["kind"], "connect");
+    assert_eq!(command["address"], "AA:BB:CC:DD:EE:FF");
+    let (status, scan) = call(
+        &app,
+        &member,
+        "POST",
+        "/api/v1/agent/commands",
+        Some(json!({"kind":"scan"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(scan["kind"], "scan");
+    let beat = json!({
+        "agent_id": Uuid::new_v4(),
+        "connection_state": "idle",
+        "session_id": null,
+        "erg_supported": false,
+        "power_range_w": null,
+        "target_power_w": null,
+        "trainer_address": "aa:bb:cc:dd:ee:ff",
+        "devices": [{"address":"aa:bb:cc:dd:ee:ff","name":"D500","rssi":-48}]
+    });
+    assert_eq!(
+        call(&app, TOKEN, "PUT", "/api/v1/agent/status", Some(beat))
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, after) = call(&app, TOKEN, "GET", "/api/v1/agent/status", None).await;
+    assert_eq!(after["trainer_address"], "AA:BB:CC:DD:EE:FF");
+    assert_eq!(after["devices"][0]["name"], "D500");
 }
 
 #[tokio::test]
@@ -253,7 +303,7 @@ async fn members_steer_and_only_the_agent_executes() {
     let app = app().router;
     let member = support::member_token(&app).await;
     let other = support::member_token(&app).await;
-    let connect = Some(json!({"kind":"connect"}));
+    let connect = Some(json!({"kind":"connect","address":"AA:BB:CC:DD:EE:FF"}));
     let forbidden = call(
         &app,
         TOKEN,

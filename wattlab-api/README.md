@@ -106,8 +106,10 @@ readiness check. Ctrl+C and Ubuntu SIGTERM request graceful shutdown and pool cl
 | PUT /api/v1/agent/commands/{id}/result | Agent reports `{status: succeeded/rejected, message}` |
 | GET, PUT /api/v1/agent/status | Agent heartbeat; GET reports `online` within 3 s of the last heartbeat |
 
-Command kinds: `connect`, `disconnect`, `start_session`, `finish_session`,
-`set_target_power` (0–2000 W) and `release_control`. A command is delivered once;
+Command kinds: `scan`, `connect` (selected Bluetooth MAC), `disconnect`,
+`start_session`, `finish_session`, `set_target_power` (0–2000 W) and
+`release_control`. Agent status may include the last scan (`devices`) and the
+address in use. A command is delivered once;
 undelivered commands expire after 10 s, delivered ones after 45 s without a result.
 The queue is in memory: restarting the API forgets pending commands, which is
 intended (stale hardware commands are never replayed). The API never talks to the

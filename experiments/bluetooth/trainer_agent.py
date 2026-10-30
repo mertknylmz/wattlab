@@ -18,10 +18,12 @@ from ftms_parser import parse_cycling_power, parse_indoor_bike_data
 from telemetry import TelemetryEvents
 from telemetry_sender import PermanentDeliveryError, TelemetrySender
 from trainer_connection import BIKE, POWER
+from trainer_scan import discover_devices, rank_devices
 
 log = logging.getLogger(__name__)
 HEARTBEAT_SECONDS = 1.0
 DISCONNECT_BUDGET = 15.0
+CONNECT_WAIT = 35.0
 
 
 class Recording:
@@ -34,17 +36,20 @@ class Recording:
 
 class TrainerAgent:
     def __init__(self, api, *, connection_factory, sender_factory, control_factory=FtmsControl,
-                 control_errors=(OSError, TimeoutError), agent_id=None):
+                 control_errors=(OSError, TimeoutError), scanner=None, agent_id=None):
         self.api = api
         self.connection_factory = connection_factory
         self.sender_factory = sender_factory
         self.control_factory = control_factory
+        self.scanner = scanner or discover_devices
         # Transport errors of the BLE library (e.g. BleakError) during control.
         self.control_errors = tuple(control_errors) + (ControlUnavailable,)
         self.agent_id = agent_id or str(uuid4())
         self.connection_state = "idle"
         self.connection = None
         self.connection_task = None
+        self.trainer_address = None
+        self.devices = []
         self.recording = None
         self.control = None
         self._stop = asyncio.Event()
@@ -98,13 +103,20 @@ class TrainerAgent:
             "erg_supported": bool(control and control.erg_supported),
             "power_range_w": [limits.min_w, limits.max_w] if limits else None,
             "target_power_w": control.target_w if control else None,
+            "trainer_address": self.trainer_address,
+            "devices": [
+                {"address": item["address"], "name": item.get("name"), "rssi": item.get("rssi")}
+                for item in self.devices
+            ],
         }
 
     # --- Commands --------------------------------------------------------------
     async def handle(self, kind, command):
         """Return (succeeded, message). Messages are short codes, never secrets."""
+        if kind == "scan":
+            return await self._scan()
         if kind == "connect":
-            return self._connect()
+            return await self._connect(command.get("address"))
         if kind == "disconnect":
             return await self._disconnect()
         if kind == "start_session":
@@ -117,17 +129,43 @@ class TrainerAgent:
             return await self._release()
         return False, "unsupported_command"
 
-    def _connect(self):
+    async def _scan(self):
         if self.connection_task is not None and not self.connection_task.done():
-            return True, "already_connected"
+            return False, "already_connected"
+        try:
+            found = await self.scanner()
+        except (OSError, TimeoutError, RuntimeError) as exc:
+            log.warning("Bluetooth scan failed (%s)", type(exc).__name__)
+            return False, "scan_failed"
+        self.devices = rank_devices(found)
+        return True, f"found:{len(self.devices)}"
+
+    async def _connect(self, address):
+        if not address:
+            return False, "trainer_not_configured"
+        if self.connection_task is not None and not self.connection_task.done():
+            if self.connection_state == "streaming" and self.trainer_address == address:
+                return True, "already_connected"
+            return False, "already_connected"
         try:
             self.connection = self.connection_factory(
+                address,
                 {BIKE: self._bike, POWER: self._power},
                 on_state=self._state, on_ready=self._ready, on_lost=self._lost)
         except (RuntimeError, ValueError):
             return False, "trainer_not_configured"
+        self.trainer_address = address
         self.connection_task = asyncio.create_task(self._run_connection(self.connection))
-        return True, "connecting"
+        deadline = asyncio.get_running_loop().time() + CONNECT_WAIT
+        while True:
+            if self.connection_state == "streaming":
+                self.devices = []
+                return True, "connected"
+            if self.connection_state == "failed" or self.connection_task.done():
+                return False, "connect_failed"
+            if asyncio.get_running_loop().time() >= deadline:
+                return False, "connect_timeout"
+            await asyncio.sleep(0.1)
 
     async def _run_connection(self, connection):
         try:
@@ -152,6 +190,8 @@ class TrainerAgent:
     async def _start_session(self, command_id):
         if self.recording is not None:
             return False, "session_already_active"
+        if self.connection_state != "streaming":
+            return False, "trainer_not_connected"
         sender = self.sender_factory()
         sender.command_id = command_id
         await sender.start()
@@ -277,14 +317,13 @@ async def main():
     from bleak import BleakClient
     from bleak.exc import BleakError
     from agent_client import AgentClient
-    from config import trainer_address
     from trainer_connection import TrainerConnection
 
     api_url = os.getenv("WATTLAB_API_URL", "").strip()
     token = os.getenv("WATTLAB_AGENT_TOKEN", "")
 
-    def connection_factory(handlers, **hooks):
-        return TrainerConnection(trainer_address(), BleakClient, handlers,
+    def connection_factory(address, handlers, **hooks):
+        return TrainerConnection(address, BleakClient, handlers,
                                  retry_errors=(OSError, TimeoutError, BleakError), **hooks)
 
     async with AgentClient(api_url, token) as api:

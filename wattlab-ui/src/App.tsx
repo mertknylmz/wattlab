@@ -2,28 +2,33 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiClient, ApiError, UnauthorizedError } from './api/client';
 import type { Member, Settings } from './api/types';
 import { AppearanceBar } from './components/AppearanceBar';
+import { ConnectionStatus } from './components/ConnectionStatus';
 import { AppearanceProvider, useAppearance } from './i18n/appearance';
 import type { MessageKey } from './i18n/messages';
 import { DEFAULT_FTP_W } from './model/zones';
+import { useAgentStatus } from './hooks/useAgentStatus';
+import { useAutoConnect } from './hooks/useAutoConnect';
 import { AuthPage } from './pages/AuthPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { LivePage } from './pages/LivePage';
 import { ProfilePage } from './pages/ProfilePage';
 import { SessionPage } from './pages/SessionPage';
-import { SettingsPage } from './pages/SettingsPage';
+import { SettingsPage, type SettingsTab } from './pages/SettingsPage';
 
 type Route =
   | { page: 'live' }
   | { page: 'history' }
   | { page: 'session'; id: string }
-  | { page: 'settings' }
+  | { page: 'settings'; tab: SettingsTab }
   | { page: 'profile' };
 
 export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/');
   if (parts[0] === 'history' && parts[1]) return { page: 'session', id: parts[1] };
   if (parts[0] === 'history') return { page: 'history' };
-  if (parts[0] === 'settings') return { page: 'settings' };
+  if (parts[0] === 'settings') {
+    return { page: 'settings', tab: parts[1] === 'connection' ? 'connection' : 'general' };
+  }
   if (parts[0] === 'profile') return { page: 'profile' };
   return { page: 'live' };
 }
@@ -130,6 +135,9 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
     }
   };
 
+  useAutoConnect(client, user != null, signOut);
+  const { agent } = useAgentStatus(client, signOut, 1000, user != null);
+
   if (user === undefined) {
     return (
       <div className="auth-page">
@@ -171,7 +179,15 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
       page = <SessionPage key={route.id} client={client} id={route.id} onUnauthorized={signOut} />;
       break;
     case 'settings':
-      page = <SettingsPage client={client} settings={settings} onSaved={setSettings} onUnauthorized={signOut} />;
+      page = (
+        <SettingsPage
+          client={client}
+          tab={route.tab}
+          settings={settings}
+          onSaved={setSettings}
+          onUnauthorized={signOut}
+        />
+      );
       break;
     case 'profile':
       page = <ProfilePage client={client} user={user} onUnauthorized={signOut} />;
@@ -228,9 +244,12 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
           <div className="breadcrumb">
             WATTLAB <span>/</span> {t(TITLES[route.page])}
           </div>
-          <span className={`badge ${badge[1]}`} data-testid="api-status">
-            {badge[0]}
-          </span>
+          <div className="header-tools">
+            <ConnectionStatus agent={agent} />
+            <span className={`badge ${badge[1]}`} data-testid="api-status">
+              {badge[0]}
+            </span>
+          </div>
         </header>
         {page}
         <footer>

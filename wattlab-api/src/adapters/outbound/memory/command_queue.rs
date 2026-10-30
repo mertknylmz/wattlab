@@ -138,7 +138,10 @@ mod tests {
             async move { queue.next(Duration::from_secs(5)).await }
         });
         tokio::task::yield_now().await;
-        let submitted = queue.submit(CommandKind::Connect, Uuid::nil());
+        let submitted = queue.submit(
+            CommandKind::connect("aa:bb:cc:dd:ee:ff").unwrap(),
+            Uuid::nil(),
+        );
         let delivered = waiter.await.unwrap().unwrap();
         assert_eq!(delivered.id(), submitted.id());
         assert_eq!(delivered.status(), CommandStatus::Delivered);

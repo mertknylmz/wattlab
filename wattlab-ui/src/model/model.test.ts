@@ -1,17 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import type { LiveSnapshot, SeriesPoint } from '../api/types';
-import { PowerTrace, buildChart, currentMetric, liveChart, type Reception } from './live';
+import { PowerTrace, buildChart, chartClock, currentMetric, liveChart, type Reception } from './live';
 import { sessionChart } from './history';
 import { formatDuration } from './format';
 import {
   activityLevel,
+  currentStreak,
   formatHours,
   groupActivity,
   heatmapRange,
   heatmapWeeks,
   localDateKey,
+  longestStreak,
   monthLabels,
+  qualifyingStreakDays,
+  recentStreak,
+  yearHeatmapRange,
 } from './activity';
+import { readLastTrainer, trainerLabel, writeTrainerAddress } from './trainerPrefs';
 import { isValidFtp, powerZone } from './zones';
 
 const NOW = '2026-10-30T10:00:00.000Z';
@@ -104,6 +110,15 @@ describe('live chart', () => {
     expect(Number(chart.segments[0].points.split(' ').at(-1)!.split(',')[1])).toBe(142);
   });
 
+  it('freezes the window on the last sample after the session ends', () => {
+    const trace = new PowerTrace();
+    trace.record(0, 150);
+    trace.record(1000, 180);
+    const frozenAt = chartClock(trace, 20_000, true);
+    expect(frozenAt).toBe(1000);
+    expect(liveChart(trace, frozenAt, 200).segments[0].points).toBe(liveChart(trace, 1000, 200).segments[0].points);
+  });
+
   it('drops samples older than sixty seconds', () => {
     const trace = new PowerTrace();
     trace.record(0, 100);
@@ -159,6 +174,19 @@ it('formats durations with hours only when needed', () => {
   expect(formatDuration(3725)).toBe('1:02:05');
 });
 
+describe('last trainer', () => {
+  it('remembers the last picked address and name', () => {
+    localStorage.clear();
+    expect(readLastTrainer()).toBeNull();
+    writeTrainerAddress('AA:BB:CC:DD:EE:FF', 'D500');
+    expect(readLastTrainer()).toEqual({ address: 'AA:BB:CC:DD:EE:FF', name: 'D500' });
+    expect(trainerLabel(readLastTrainer()!)).toBe('D500');
+    writeTrainerAddress('11:22:33:44:55:66');
+    expect(readLastTrainer()).toEqual({ address: '11:22:33:44:55:66', name: null });
+    expect(trainerLabel(readLastTrainer()!)).toBe('11:22:33:44:55:66');
+  });
+});
+
 describe('activity heatmap', () => {
   it('groups rides on the local day and builds a Sunday-aligned year grid', () => {
     const now = new Date(2026, 9, 30);
@@ -182,5 +210,29 @@ describe('activity heatmap', () => {
     const labels = monthLabels(weeks, 'en');
     expect(labels[0]?.label).toMatch(/Oct|Nov/);
     expect(labels.every((label, index) => index === 0 || label.index - labels[index - 1].index >= 3)).toBe(true);
+  });
+
+  it('counts streaks only on days with a 30-minute session', () => {
+    const now = new Date(2026, 9, 30);
+    const range = yearHeatmapRange(2026);
+    expect(range.from.getDay()).toBe(0);
+    expect(range.to.getDay()).toBe(0);
+    const entries = [
+      { started_at: new Date(2026, 9, 28, 8).toISOString(), duration_seconds: 1800 },
+      { started_at: new Date(2026, 9, 29, 8).toISOString(), duration_seconds: 600 },
+      { started_at: new Date(2026, 9, 30, 8).toISOString(), duration_seconds: 2400 },
+    ];
+    const qualified = qualifyingStreakDays(entries);
+    expect([...qualified].sort()).toEqual(['2026-10-28', '2026-10-30']);
+    expect(currentStreak(qualified, now)).toBe(1);
+    expect(recentStreak(qualified, range, now)).toBe(1);
+    expect(longestStreak(qualified, range)).toBe(1);
+    const three = qualifyingStreakDays([
+      { started_at: new Date(2026, 9, 28, 8).toISOString(), duration_seconds: 1800 },
+      { started_at: new Date(2026, 9, 29, 8).toISOString(), duration_seconds: 1800 },
+      { started_at: new Date(2026, 9, 30, 8).toISOString(), duration_seconds: 1800 },
+    ]);
+    expect(currentStreak(three, now)).toBe(3);
+    expect(longestStreak(three, range)).toBe(3);
   });
 });

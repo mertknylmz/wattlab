@@ -125,6 +125,12 @@ function round(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+/** After the ride ends, keep the last window still; do not slide it left. */
+export function chartClock(trace: PowerTrace, now: number, finished: boolean): number {
+  if (!finished) return now;
+  return trace.samples.at(-1)?.time ?? now;
+}
+
 export function liveChart(trace: PowerTrace, now: number, ftp: number): Chart {
   return buildChart(
     trace.samples.map((s) => ({ x: 1 - (now - s.time) / LIVE_WINDOW_MS, value: s.value })),

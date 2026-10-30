@@ -89,18 +89,24 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             self.senders.append(FakeSender(sender_fail))
             return self.senders[-1]
 
-        def connection_factory(handlers, **hooks):
-            self.connections.append(FakeConnection(handlers, **hooks))
-            return self.connections[-1]
+        def connection_factory(address, handlers, **hooks):
+            connection = FakeConnection(handlers, **hooks)
+            connection.address = address
+            self.connections.append(connection)
+            return connection
 
         return TrainerAgent(SimpleNamespace(), connection_factory=connection_factory,
-                            sender_factory=sender_factory, control_factory=control)
+                            sender_factory=sender_factory, control_factory=control,
+                            scanner=self.scanner)
 
-    async def connected(self, agent):
-        self.assertEqual(await agent.handle("connect", {}), (True, "connecting"))
-        for _ in range(5):
-            await asyncio.sleep(0)
+    async def scanner(self):
+        return [{"address": "AA:BB:CC:DD:EE:FF", "name": "D500", "rssi": -40,
+                 "likely_trainer": True}]
+
+    async def connected(self, agent, address="AA:BB:CC:DD:EE:FF"):
+        self.assertEqual(await agent.handle("connect", {"address": address}), (True, "connected"))
         self.assertEqual(agent.connection_state, "streaming")
+        self.assertEqual(self.connections[-1].address, address)
 
     async def test_telemetry_is_recorded_only_inside_a_started_session(self):
         agent = self.agent()
@@ -124,8 +130,18 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await agent.handle("finish_session", {}), (False, "no_active_session"))
         await agent.handle("disconnect", {})
 
+    async def test_session_requires_a_streaming_trainer(self):
+        agent = self.agent()
+        self.assertEqual(await agent.handle("start_session", {}), (False, "trainer_not_connected"))
+        self.assertEqual(self.senders, [])
+        await self.connected(agent)
+        ok, message = await agent.handle("start_session", {})
+        self.assertTrue(ok)
+        self.assertTrue(message.startswith("session:"))
+
     async def test_session_creation_failure_is_reported_and_cleaned_up(self):
         agent = self.agent(sender_fail=True)
+        await self.connected(agent)
         self.assertEqual(await agent.handle("start_session", {}), (False, "session_not_created"))
         self.assertTrue(self.senders[0].closed)
         self.assertIsNone(agent.recording)
@@ -169,7 +185,19 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await agent.handle("disconnect", {}), (True, "already_disconnected"))
         self.assertEqual(await agent.handle("release_control", {}), (True, "no_control"))
         await self.connected(agent)
-        self.assertEqual(await agent.handle("connect", {}), (True, "already_connected"))
+        self.assertEqual(await agent.handle("connect", {"address": "AA:BB:CC:DD:EE:FF"}),
+                         (True, "already_connected"))
+        await agent.handle("disconnect", {})
+
+    async def test_scan_lists_devices_and_connect_needs_the_chosen_address(self):
+        agent = self.agent()
+        self.assertEqual(await agent.handle("connect", {}), (False, "trainer_not_configured"))
+        self.assertEqual(await agent.handle("scan", {}), (True, "found:1"))
+        self.assertEqual(agent.status()["devices"][0]["name"], "D500")
+        await self.connected(agent)
+        self.assertEqual(agent.status()["trainer_address"], "AA:BB:CC:DD:EE:FF")
+        self.assertEqual(agent.status()["devices"], [])
+        self.assertEqual(await agent.handle("scan", {}), (False, "already_connected"))
         await agent.handle("disconnect", {})
 
     async def test_run_reports_results_and_shuts_down_cleanly(self):
@@ -190,6 +218,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             beats.append(status)
 
         agent = self.agent()
+        await self.connected(agent)
         agent.api = SimpleNamespace(next_command=next_command, report=report, heartbeat=heartbeat)
         runner = asyncio.create_task(agent.run())
         for _ in range(50):
@@ -199,7 +228,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         agent.stop()
         await runner
         self.assertEqual(reports[0][:2], (command_id, True))
-        self.assertTrue(beats and beats[0]["connection_state"] == "idle")
+        self.assertTrue(beats and beats[0]["connection_state"] == "streaming")
         self.assertTrue(self.senders[0].closed, "shutdown finishes the active session")
 
 

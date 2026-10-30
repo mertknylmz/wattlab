@@ -35,7 +35,8 @@ sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
 ## Çalıştırma
 
 Trainer kullanacaksan trainer açık olmalı; Zwift gibi diğer trainer istemcilerini kapat.
-Yerel `.env` içinde `TRAINER_ADDRESS` doğru olmalı.
+Trainer adresi artık `.env` ile sabitlenmez. Ayarlar’dan Bluetooth taraması
+yapılır, listeden cihaz seçilir; son seçim `localStorage`’da kalır.
 
 ```bash
 cd wattlab-desktop
@@ -66,16 +67,18 @@ yazılmaz). Profil takvimi Pazar’dan Cumartesi’ye gider.
 
 ## Trainer paneli
 
-Ajan başlarken trainer’a **bağlanmaz**; ekrandan komut bekler. Canlı görünümdeki
-Trainer panelinden:
+Ajan başlarken trainer’a **bağlanmaz**; ekrandan komut bekler. Ayarlar’da **Tara**,
+listeden cihaz seç, sonra bağlan. Son seçim bu bilgisayarda kalır. Sağ üstteki bağlantı simgesi duruma gider;
+tıklayınca **Ayarlar → Bağlantı** açılır. Canlı ekranda yalnızca oturum
+başlat/bitir vardır. ERG ve Bluetooth **Ayarlar → Bağlantı**’dadır; Genel sekmesi FTP içindir:
 
-1. **Trainer’a bağlan** — ajan Bluetooth bağlantısını kurar ve veri kanallarına abone olur.
-2. **Oturumu başlat** — API’de yeni oturum açılır; ölçümler bu oturuma kaydedilir.
-   Oturum o anki FTP’yi saklar.
+1. **Trainer’a bağlan** — ajan seçilen adrese Bluetooth bağlantısını kurar ve veri kanallarına abone olur. Trainer yanıt verene kadar “bağlı” sayılmaz. Son seçilen trainer bu bilgisayarda hatırlanır (seçili ≠ bağlı). Uygulama açılınca, cihaz açıksa o adrese bir kez yeniden bağlanır; oturum otomatik başlamaz. Koparınca aynı açılışta tekrar bağlanılmaz.
+2. **Oturumu başlat** — yalnızca trainer bağlıyken (veri akıyorken) açılır.
+   API’de yeni oturum oluşur; ölçümler bu oturuma kaydedilir. Oturum o anki FTP’yi saklar.
 3. Pedal çevir. Pedalı bırakınca gerçek 0 W ölçümlerinin gelmesini bekle; veri
    yokluğu sıfır değildir, kesinti grafikte boşluk bırakır.
 4. **Oturumu bitir** — ajan bekleyen ölçümleri gönderir ve oturumu kapatır.
-5. **Bağlantıyı kes** — varsa ERG hedefi bırakılır, sonra bağlantı kapanır.
+5. **Bağlantıyı kes** (Ayarlar) — varsa ERG hedefi bırakılır, sonra bağlantı kapanır.
 
 Her komutun sonucu panelin altında görünür: bekleniyor, tamamlandı, gerekçeli ret
 (örneğin “aktif oturum yok”) veya zaman aşımı. Ajan çalışmıyorsa panel bunu söyler ve
@@ -83,10 +86,11 @@ düğmeler devre dışıdır. Ekran trainer’ın komutu uyguladığını varsay
 
 ### Hedef güç (ERG)
 
-Trainer bağlı ve FTMS hedef güç desteğini bildiriyorsa ERG alanı etkinleşir; trainer’ın
-bildirdiği güç aralığı gösterilir. Hedefi watt olarak girip **Uygula**’ya bas; trainer
-direnci bu güce göre ayarlar. **Direnci bırak** hedefi kaldırır. Bağlantı koparsa
-ajan kontrol durumunu unutur; yeniden bağlanınca eski hedef otomatik gönderilmez.
+Trainer bağlı ve FTMS hedef güç desteğini bildiriyorsa **Ayarlar → Bağlantı** içindeki
+ERG alanı etkinleşir; trainer’ın bildirdiği güç aralığı gösterilir. Hedefi watt olarak
+girip **Uygula**’ya bas; trainer direnci bu güce göre ayarlar. **Direnci bırak** hedefi
+kaldırır. Bağlantı koparsa
+ajan kontrol durumunu unutur; bağlanırken ve direnç bırakılınca leftover ERG silinir, trainer 0% simülasyona (serbest sürüş) alınır. Eski hedef otomatik gönderilmez.
 ERG komutları D500 üzerinde henüz doğrulanmadı; ilk denemeyi düşük bir hedefle yap.
 
 ## Kapatma

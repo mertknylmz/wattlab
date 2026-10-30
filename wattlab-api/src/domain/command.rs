@@ -4,9 +4,10 @@ use uuid::Uuid;
 
 /// A request for the Python trainer agent. Rust records intent and outcome;
 /// only the agent touches Bluetooth or decides whether the trainer can comply.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandKind {
-    Connect,
+    Scan,
+    Connect { address: String },
     Disconnect,
     StartSession,
     FinishSession,
@@ -26,6 +27,7 @@ pub enum CommandStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandError {
     InvalidTargetPower,
+    InvalidAddress,
     /// Result for an expired command or a different result for a finished one.
     Conflict,
 }
@@ -33,6 +35,7 @@ impl fmt::Display for CommandError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::InvalidTargetPower => "Target power must be between 0 and 2000 W",
+            Self::InvalidAddress => "Trainer address must be a Bluetooth MAC address",
             Self::Conflict => "Command is no longer awaiting this result",
         })
     }
@@ -60,6 +63,12 @@ pub struct Command {
 }
 
 impl CommandKind {
+    pub fn connect(address: &str) -> Result<Self, CommandError> {
+        Ok(Self::Connect {
+            address: parse_ble_address(address)?,
+        })
+    }
+
     pub fn set_target_power(watts: i64) -> Result<Self, CommandError> {
         i32::try_from(watts)
             .ok()
@@ -67,6 +76,27 @@ impl CommandKind {
             .map(|watts| Self::SetTargetPower { watts })
             .ok_or(CommandError::InvalidTargetPower)
     }
+}
+
+/// BlueZ-style MAC (`AA:BB:CC:DD:EE:FF`). The agent connects to this address;
+/// Rust only checks the shape.
+pub fn parse_ble_address(raw: &str) -> Result<String, CommandError> {
+    let parts: Vec<&str> = raw
+        .trim()
+        .split([':', '-'])
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.len() != 6 {
+        return Err(CommandError::InvalidAddress);
+    }
+    let mut bytes = Vec::with_capacity(6);
+    for part in parts {
+        if part.len() != 2 || !part.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(CommandError::InvalidAddress);
+        }
+        bytes.push(part.to_ascii_uppercase());
+    }
+    Ok(bytes.join(":"))
 }
 
 impl Command {
@@ -139,8 +169,8 @@ impl Command {
     pub fn issued_by(&self) -> Uuid {
         self.issued_by
     }
-    pub fn kind(&self) -> CommandKind {
-        self.kind
+    pub fn kind(&self) -> &CommandKind {
+        &self.kind
     }
     pub fn status(&self) -> CommandStatus {
         self.status
@@ -158,6 +188,13 @@ impl Command {
 
 /// Last report from the trainer agent. Reported, not verified, by Rust.
 #[derive(Debug, Clone, PartialEq)]
+pub struct NearbyDevice {
+    pub address: String,
+    pub name: Option<String>,
+    pub rssi: Option<i16>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentStatus {
     pub agent_id: Uuid,
     pub connection_state: Option<String>,
@@ -165,6 +202,8 @@ pub struct AgentStatus {
     pub erg_supported: bool,
     pub power_range_w: Option<(i32, i32)>,
     pub target_power_w: Option<i32>,
+    pub trainer_address: Option<String>,
+    pub devices: Vec<NearbyDevice>,
     pub received_at: DateTime<Utc>,
 }
 
@@ -188,7 +227,11 @@ mod tests {
 
     #[test]
     fn commands_are_delivered_once_and_results_are_idempotent() {
-        let mut command = Command::new(CommandKind::Connect, Uuid::nil(), now());
+        let mut command = Command::new(
+            CommandKind::connect("aa:bb:cc:dd:ee:ff").unwrap(),
+            Uuid::nil(),
+            now(),
+        );
         assert!(command.deliver(now()));
         assert!(!command.deliver(now()));
         command.complete(true, None, now()).unwrap();
@@ -229,6 +272,13 @@ mod tests {
         assert!(CommandKind::set_target_power(-1).is_err());
         assert!(CommandKind::set_target_power(2001).is_err());
         assert_eq!(
+            CommandKind::connect("aa-bb-cc-dd-ee-ff"),
+            Ok(CommandKind::Connect {
+                address: "AA:BB:CC:DD:EE:FF".into()
+            })
+        );
+        assert!(CommandKind::connect("trainer").is_err());
+        assert_eq!(
             CommandKind::set_target_power(250),
             Ok(CommandKind::SetTargetPower { watts: 250 })
         );
@@ -249,6 +299,8 @@ mod tests {
             erg_supported: false,
             power_range_w: None,
             target_power_w: None,
+            trainer_address: None,
+            devices: Vec::new(),
             received_at: now(),
         };
         assert!(status.online(now() + AGENT_ONLINE_WINDOW));

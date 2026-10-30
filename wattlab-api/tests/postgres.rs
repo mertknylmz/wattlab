@@ -1191,7 +1191,7 @@ async fn members_cannot_see_or_steer_another_members_session() {
         Some(&bob),
         "POST",
         "/api/v1/agent/commands",
-        Some(json!({"kind": "connect"})),
+        Some(json!({"kind": "connect", "address": "AA:BB:CC:DD:EE:FF"})),
     )
     .await;
     assert_eq!(

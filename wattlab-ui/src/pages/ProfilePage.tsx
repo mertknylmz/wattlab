@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { UnauthorizedError, type ApiClient } from '../api/client';
-import type { Member } from '../api/types';
+import type { ActivityEntry, Member } from '../api/types';
 import { useAppearance } from '../i18n/appearance';
 import type { MessageKey } from '../i18n/messages';
 import {
   activityLevel,
   formatHours,
   groupActivity,
-  heatmapRange,
   heatmapWeeks,
+  longestStreak,
   monthLabels,
+  qualifyingStreakDays,
+  recentStreak,
+  yearHeatmapRange,
   type DayActivity,
 } from '../model/activity';
 
@@ -27,21 +30,26 @@ interface Props {
   client: ApiClient;
   user: Member;
   onUnauthorized(): void;
+  now?: () => Date;
 }
 
-export function ProfilePage({ client, user, onUnauthorized }: Props) {
+export function ProfilePage({ client, user, onUnauthorized, now = () => new Date() }: Props) {
   const { t, locale } = useAppearance();
-  const range = useMemo(() => heatmapRange(), []);
-  const [days, setDays] = useState<Map<string, DayActivity>>(new Map());
+  const thisYear = now().getFullYear();
+  const [year, setYear] = useState(thisYear);
+  const range = useMemo(() => yearHeatmapRange(year), [year]);
+  const [entries, setEntries] = useState<ActivityEntry[]>([]);
   const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [selected, setSelected] = useState<DayActivity | null>(null);
 
   useEffect(() => {
     let active = true;
+    setState('loading');
     client.activity(range.from.toISOString(), range.to.toISOString()).then(
       (activity) => {
         if (!active) return;
-        setDays(groupActivity(activity.entries));
+        setEntries(activity.entries);
+        setSelected(null);
         setState('ready');
       },
       (error) => {
@@ -55,8 +63,12 @@ export function ProfilePage({ client, user, onUnauthorized }: Props) {
     };
   }, [client, onUnauthorized, range.from, range.to]);
 
+  const days = useMemo(() => groupActivity(entries), [entries]);
+  const qualified = useMemo(() => qualifyingStreakDays(entries), [entries]);
   const weeks = useMemo(() => heatmapWeeks(range, days), [range, days]);
   const months = useMemo(() => monthLabels(weeks, locale), [weeks, locale]);
+  const last = useMemo(() => recentStreak(qualified, range, now()), [now, qualified, range]);
+  const longest = useMemo(() => longestStreak(qualified, range), [qualified, range]);
   const totals = useMemo(() => {
     let sessions = 0;
     let duration = 0;
@@ -78,6 +90,15 @@ export function ProfilePage({ client, user, onUnauthorized }: Props) {
           <h1>{user.username}</h1>
           <p className="subtitle">{t('profileSubtitle')}</p>
         </div>
+        <div className="year-picker" role="group" aria-label={t('activityYear')}>
+          <button type="button" className="secondary" disabled={year <= thisYear - 10} onClick={() => setYear(year - 1)}>
+            ‹
+          </button>
+          <strong>{year}</strong>
+          <button type="button" className="secondary" disabled={year >= thisYear} onClick={() => setYear(year + 1)}>
+            ›
+          </button>
+        </div>
       </section>
       <section className="list-card profile-card">
         <div className="profile-totals">
@@ -90,6 +111,17 @@ export function ProfilePage({ client, user, onUnauthorized }: Props) {
           <p>
             <strong>{totals.activeDays}</strong> {t('days')}
           </p>
+          <p data-testid="current-streak">
+            <strong>{last}</strong> {t('lastStreak')}
+          </p>
+          <p data-testid="longest-streak">
+            <strong>{longest}</strong> {t('longestStreak')}
+          </p>
+          <span className="info-tip">
+            <button type="button" className="info-icon" title={t('streakRule')} aria-label={t('streakRule')}>
+              i
+            </button>
+          </span>
         </div>
         {state === 'failed' ? (
           <p className="access-error" role="alert">

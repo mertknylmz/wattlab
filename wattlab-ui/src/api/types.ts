@@ -20,6 +20,12 @@ export interface LiveSnapshot {
   captured_at: string | null;
 }
 
+export interface NearbyDevice {
+  address: string;
+  name: string | null;
+  rssi: number | null;
+}
+
 export interface AgentState {
   online: boolean;
   agent_id: string | null;
@@ -28,6 +34,8 @@ export interface AgentState {
   erg_supported: boolean;
   power_range_w: [number, number] | null;
   target_power_w: number | null;
+  trainer_address: string | null;
+  devices: NearbyDevice[];
   last_seen_at: string | null;
 }
 
@@ -103,6 +111,7 @@ export interface Settings {
 }
 
 export type CommandKind =
+  | 'scan'
   | 'connect'
   | 'disconnect'
   | 'start_session'
@@ -110,12 +119,18 @@ export type CommandKind =
   | 'set_target_power'
   | 'release_control';
 
+export interface CommandPayload {
+  targetPowerW?: number;
+  address?: string;
+}
+
 export type CommandStatus = 'pending' | 'delivered' | 'succeeded' | 'rejected' | 'expired';
 
 export interface Command {
   id: string;
   kind: CommandKind;
   target_power_w: number | null;
+  address: string | null;
   status: CommandStatus;
   created_at: string;
   completed_at: string | null;

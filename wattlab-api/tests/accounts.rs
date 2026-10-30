@@ -270,7 +270,7 @@ async fn logout_and_trainer_commands_respect_an_active_session() {
             "POST",
             "/api/v1/agent/commands",
             Some(&other),
-            Some(json!({"kind": "connect"})),
+            Some(json!({"kind": "connect", "address": "AA:BB:CC:DD:EE:FF"})),
         )
         .await
         .1["error"],
@@ -282,7 +282,7 @@ async fn logout_and_trainer_commands_respect_an_active_session() {
             "POST",
             "/api/v1/agent/commands",
             Some(&token),
-            Some(json!({"kind": "connect"})),
+            Some(json!({"kind": "connect", "address": "AA:BB:CC:DD:EE:FF"})),
         )
         .await
         .0,

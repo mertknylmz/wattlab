@@ -62,7 +62,7 @@ impl CommandService {
             command.status(),
             CommandStatus::Delivered | CommandStatus::Succeeded
         );
-        if command.kind() != CommandKind::StartSession || !executing {
+        if !matches!(command.kind(), CommandKind::StartSession) || !executing {
             return Err(ApplicationError::CommandConflict);
         }
         Ok(command.issued_by())

@@ -46,13 +46,13 @@ function setup() {
       cycling_power_received_at: null,
       captured_at: at,
     };
-    const agent = { online: false, agent_id: null, connection_state: null, session_id: null, erg_supported: false, power_range_w: null, target_power_w: null, last_seen_at: null };
+    const agent = { online: false, agent_id: null, connection_state: null, session_id: null, erg_supported: false, power_range_w: null, target_power_w: null, trainer_address: null, devices: [], last_seen_at: null };
     await act(async () => {
       push(`event: snapshot\ndata: ${JSON.stringify({ live, agent })}\n\n`);
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
   };
-  return { send, onOnline, tick: (ms: number) => (clock = ms) };
+  return { send, push, onOnline, tick: (ms: number) => (clock = ms) };
 }
 
 it('shows live values with zone and keeps a real zero before finish', async () => {
@@ -78,5 +78,93 @@ it('says the agent is not running and disables commands', async () => {
   const live = setup();
   await live.send(100);
   expect(screen.getByText(/Trainer agent is not running/)).toBeTruthy();
-  expect((screen.getByRole('button', { name: 'Connect trainer' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Connect trainer' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull();
+  expect((screen.getByRole('button', { name: 'Finish session' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByText('Target power (ERG)')).toBeNull();
+});
+
+it('keeps session time empty until a ride is running', async () => {
+  const live = setup();
+  expect(screen.getByTestId('duration').textContent).toBe('—:—');
+  const started = new Date(Date.now() - 53 * 60 * 1000).toISOString();
+  const finished = new Date().toISOString();
+  await act(async () => {
+    live.push(
+      `event: snapshot\ndata: ${JSON.stringify({
+        live: {
+          session: { id: 's', request_id: 'r', started_at: started, finished_at: finished },
+          connection_state: 'streaming',
+          fresh: false,
+          speed_kmh: null,
+          cadence_rpm: null,
+          power_w: null,
+          power_source: null,
+          ftms_received_at: null,
+          cycling_power_received_at: null,
+          captured_at: finished,
+        },
+        agent: {
+          online: true,
+          agent_id: 'agent',
+          connection_state: 'streaming',
+          session_id: null,
+          erg_supported: false,
+          power_range_w: null,
+          target_power_w: null,
+          trainer_address: null,
+          devices: [],
+          last_seen_at: finished,
+        },
+      })}\n\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(screen.getByTestId('trainer-status').textContent).toBe('Session finished');
+  expect(screen.getByTestId('duration').textContent).toBe('—:—');
+});
+
+it('keeps start session disabled until the trainer is streaming', async () => {
+  const live = setup();
+  const at = new Date().toISOString();
+  const empty = {
+    session: null,
+    connection_state: 'idle',
+    fresh: false,
+    speed_kmh: null,
+    cadence_rpm: null,
+    power_w: null,
+    power_source: null,
+    ftms_received_at: null,
+    cycling_power_received_at: null,
+    captured_at: null,
+  };
+  const idleAgent = {
+    online: true,
+    agent_id: 'agent',
+    connection_state: 'idle',
+    session_id: null,
+    erg_supported: false,
+    power_range_w: null,
+    target_power_w: null,
+    trainer_address: null,
+    devices: [],
+    last_seen_at: at,
+  };
+  await act(async () => {
+    live.push(`event: snapshot\ndata: ${JSON.stringify({ live: empty, agent: idleAgent })}\n\n`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect((screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled).toBe(true);
+
+  await act(async () => {
+    live.push(
+      `event: snapshot\ndata: ${JSON.stringify({
+        live: { ...empty, connection_state: 'streaming' },
+        agent: { ...idleAgent, connection_state: 'streaming' },
+      })}\n\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect((screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled).toBe(false);
 });

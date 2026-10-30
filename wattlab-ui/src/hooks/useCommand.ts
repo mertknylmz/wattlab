@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiClient, UnauthorizedError } from '../api/client';
-import type { Command, CommandKind } from '../api/types';
+import type { Command, CommandKind, CommandPayload } from '../api/types';
 
 const POLL_MS = 500;
 const TERMINAL = new Set(['succeeded', 'rejected', 'expired']);
@@ -21,11 +21,11 @@ export function useCommand(client: ApiClient, onUnauthorized: () => void) {
   useEffect(() => () => void generation.current++, []);
 
   const submit = useCallback(
-    async (kind: CommandKind, targetPowerW?: number) => {
+    async (kind: CommandKind, payload?: CommandPayload) => {
       const run = ++generation.current;
       setState({ kind, status: 'pending', message: null });
       try {
-        let command = await client.submit(kind, targetPowerW);
+        let command = await client.submit(kind, payload);
         while (!TERMINAL.has(command.status)) {
           await new Promise((resolve) => setTimeout(resolve, POLL_MS));
           if (run !== generation.current) return;

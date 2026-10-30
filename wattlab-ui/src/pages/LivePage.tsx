@@ -6,7 +6,7 @@ import { PowerChart } from '../components/PowerChart';
 import { useAppearance } from '../i18n/appearance';
 import type { MessageKey } from '../i18n/messages';
 import { formatDuration, formatNumber } from '../model/format';
-import { PowerTrace, currentMetric, liveChart, type Reception } from '../model/live';
+import { PowerTrace, chartClock, currentMetric, liveChart, type Reception } from '../model/live';
 import { ZONE_NAME_KEYS, powerZone } from '../model/zones';
 import { TrainerPanel } from './TrainerPanel';
 
@@ -44,7 +44,9 @@ export function LivePage({ client, ftp, ftpIsDefault, now = monotonic, onUnautho
         const time = now();
         const next: Reception = { snapshot: live, sampledAt: time, online: true };
         if (receptionRef.current.snapshot?.session?.id !== live.session?.id) trace.current.clear();
-        trace.current.record(time, currentMetric(next, 'power_w', time));
+        if (!receptionRef.current.snapshot?.session?.finished_at) {
+          trace.current.record(time, currentMetric(next, 'power_w', time));
+        }
         receptionRef.current = next;
         setReception(next);
         setAgent(agent);
@@ -62,6 +64,7 @@ export function LivePage({ client, ftp, ftpIsDefault, now = monotonic, onUnautho
     });
     stream.start();
     const timer = setInterval(() => {
+      if (receptionRef.current.snapshot?.session?.finished_at) return;
       trace.current.markGapIfExpired(now(), currentMetric(receptionRef.current, 'power_w', now()));
       setTick((tick) => tick + 1);
     }, 1000);
@@ -79,7 +82,7 @@ export function LivePage({ client, ftp, ftpIsDefault, now = monotonic, onUnautho
   const live = power != null || cadence != null || speed != null;
   const session = reception.snapshot?.session ?? null;
   const zone = powerZone(power, ftp);
-  const chart = liveChart(trace.current, time, ftp);
+  const chart = liveChart(trace.current, chartClock(trace.current, time, Boolean(session?.finished_at)), ftp);
   const hasSamples = trace.current.samples.some((sample) => sample.value != null);
 
   const trainerStatus = !reception.online
@@ -93,9 +96,8 @@ export function LivePage({ client, ftp, ftpIsDefault, now = monotonic, onUnautho
           : STATES[reception.snapshot?.connection_state ?? '']
             ? t(STATES[reception.snapshot?.connection_state ?? ''])
             : t('waitingConnection');
-  const elapsed = session
-    ? ((session.finished_at ? Date.parse(session.finished_at) : Date.now()) - Date.parse(session.started_at)) / 1000
-    : null;
+  const elapsed =
+    session && !session.finished_at ? (Date.now() - Date.parse(session.started_at)) / 1000 : null;
   const chartStatus =
     power === 0
       ? t('chartZero')

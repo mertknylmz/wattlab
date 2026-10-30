@@ -4,6 +4,7 @@ import type {
   AuthSession,
   Command,
   CommandKind,
+  CommandPayload,
   DesktopCapabilities,
   Member,
   SessionPage,
@@ -146,8 +147,10 @@ export class ApiClient {
   saveFtp(ftp: number | null) {
     return this.request<Settings>('PUT', '/api/v1/settings', { ftp_w: ftp });
   }
-  submit(kind: CommandKind, targetPowerW?: number) {
-    const body = kind === 'set_target_power' ? { kind, target_power_w: targetPowerW } : { kind };
+  submit(kind: CommandKind, payload?: CommandPayload) {
+    const body: Record<string, unknown> = { kind };
+    if (kind === 'set_target_power') body.target_power_w = payload?.targetPowerW;
+    if (kind === 'connect') body.address = payload?.address;
     return this.request<Command>('POST', '/api/v1/agent/commands', body);
   }
   command(id: string) {
