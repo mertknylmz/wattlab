@@ -1,7 +1,7 @@
 use super::SessionResponse;
 use crate::{
     application::history_service::{SessionPage, SummarizedSession, ZoneReference},
-    domain::history::{PowerSource, SeriesPoint, SessionSummary},
+    domain::history::{ActivityEntry, PowerSource, SeriesPoint, SessionSummary},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,38 @@ use uuid::Uuid;
 pub(crate) struct PageQuery {
     pub limit: Option<String>,
     pub before: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ActivityQuery {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Serialize)]
+pub(crate) struct ActivityResponse {
+    entries: Vec<ActivityEntryDto>,
+}
+impl From<Vec<ActivityEntry>> for ActivityResponse {
+    fn from(entries: Vec<ActivityEntry>) -> Self {
+        Self {
+            entries: entries.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ActivityEntryDto {
+    started_at: DateTime<Utc>,
+    duration_seconds: i64,
+}
+impl From<ActivityEntry> for ActivityEntryDto {
+    fn from(entry: ActivityEntry) -> Self {
+        Self {
+            started_at: entry.started_at,
+            duration_seconds: entry.duration_seconds,
+        }
+    }
 }
 
 #[derive(Serialize)]

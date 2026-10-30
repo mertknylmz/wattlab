@@ -7,6 +7,7 @@ use crate::{
     domain::settings::{AthleteSettings, DEFAULT_FTP_W, Ftp},
 };
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 #[derive(sqlx::FromRow)]
 struct SettingsRow {
@@ -25,11 +26,17 @@ impl SettingsRow {
 }
 
 impl SettingsRepository for PgSessionRepository {
-    fn settings(&self) -> RepositoryFuture<'_, AthleteSettings> {
+    fn settings(&self, member: Uuid) -> RepositoryFuture<'_, AthleteSettings> {
         Box::pin(async move {
+            // Without a stored row the member sees the default since account creation.
             let row: Option<SettingsRow> = sqlx::query_as(
-                "SELECT ftp_w, ftp_is_default, updated_at FROM athlete_settings WHERE id = 1",
+                "SELECT COALESCE(s.ftp_w, $2) AS ftp_w, \
+                COALESCE(s.ftp_is_default, true) AS ftp_is_default, \
+                COALESCE(s.updated_at, m.created_at) AS updated_at \
+                FROM member m LEFT JOIN athlete_settings s ON s.member_id = m.id WHERE m.id = $1",
             )
+            .bind(member)
+            .bind(DEFAULT_FTP_W)
             .fetch_optional(&self.pool)
             .await
             .map_err(repository_error)?;
@@ -37,15 +44,17 @@ impl SettingsRepository for PgSessionRepository {
         })
     }
 
-    fn update_ftp(&self, ftp: Option<Ftp>) -> RepositoryFuture<'_, AthleteSettings> {
+    fn update_ftp(&self, member: Uuid, ftp: Option<Ftp>) -> RepositoryFuture<'_, AthleteSettings> {
         Box::pin(async move {
             let row: Option<SettingsRow> = sqlx::query_as(
-                "UPDATE athlete_settings SET ftp_w = $1, ftp_is_default = $2, \
-                updated_at = clock_timestamp() WHERE id = 1 \
+                "INSERT INTO athlete_settings (member_id, ftp_w, ftp_is_default) VALUES ($3, $1, $2) \
+                ON CONFLICT (member_id) DO UPDATE SET ftp_w = EXCLUDED.ftp_w, \
+                ftp_is_default = EXCLUDED.ftp_is_default, updated_at = clock_timestamp() \
                 RETURNING ftp_w, ftp_is_default, updated_at",
             )
             .bind(ftp.map_or(DEFAULT_FTP_W, Ftp::watts))
             .bind(ftp.is_none())
+            .bind(member)
             .fetch_optional(&self.pool)
             .await
             .map_err(repository_error)?;

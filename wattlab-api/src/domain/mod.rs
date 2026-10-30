@@ -5,6 +5,7 @@ pub mod event_error;
 pub mod events;
 pub mod history;
 pub mod live;
+pub mod member;
 pub mod session;
 pub mod settings;
 pub mod source;

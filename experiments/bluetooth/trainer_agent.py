@@ -108,7 +108,7 @@ class TrainerAgent:
         if kind == "disconnect":
             return await self._disconnect()
         if kind == "start_session":
-            return await self._start_session()
+            return await self._start_session(command.get("id"))
         if kind == "finish_session":
             return await self._finish_session()
         if kind == "set_target_power":
@@ -149,10 +149,11 @@ class TrainerAgent:
             return False, "disconnect_timeout"
         return True, "disconnected"
 
-    async def _start_session(self):
+    async def _start_session(self, command_id):
         if self.recording is not None:
             return False, "session_already_active"
         sender = self.sender_factory()
+        sender.command_id = command_id
         await sender.start()
         try:
             await sender.ensure_session()
@@ -280,7 +281,7 @@ async def main():
     from trainer_connection import TrainerConnection
 
     api_url = os.getenv("WATTLAB_API_URL", "").strip()
-    token = os.getenv("WATTLAB_API_TOKEN", "")
+    token = os.getenv("WATTLAB_AGENT_TOKEN", "")
 
     def connection_factory(handlers, **hooks):
         return TrainerConnection(trainer_address(), BleakClient, handlers,

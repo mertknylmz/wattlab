@@ -3,6 +3,15 @@ import type { LiveSnapshot, SeriesPoint } from '../api/types';
 import { PowerTrace, buildChart, currentMetric, liveChart, type Reception } from './live';
 import { sessionChart } from './history';
 import { formatDuration } from './format';
+import {
+  activityLevel,
+  formatHours,
+  groupActivity,
+  heatmapRange,
+  heatmapWeeks,
+  localDateKey,
+  monthLabels,
+} from './activity';
 import { isValidFtp, powerZone } from './zones';
 
 const NOW = '2026-10-30T10:00:00.000Z';
@@ -148,4 +157,30 @@ it('formats durations with hours only when needed', () => {
   expect(formatDuration(null)).toBe('—:—');
   expect(formatDuration(65)).toBe('01:05');
   expect(formatDuration(3725)).toBe('1:02:05');
+});
+
+describe('activity heatmap', () => {
+  it('groups rides on the local day and builds a Sunday-aligned year grid', () => {
+    const now = new Date(2026, 9, 30);
+    const range = heatmapRange(now);
+    expect(range.from.getDay()).toBe(0);
+    const days = groupActivity([
+      { started_at: new Date(2026, 9, 30, 8).toISOString(), duration_seconds: 3600 },
+      { started_at: new Date(2026, 9, 30, 18).toISOString(), duration_seconds: 1800 },
+    ]);
+    const today = days.get(localDateKey(now));
+    expect(today).toEqual({ date: '2026-10-30', sessions: 2, durationSeconds: 5400 });
+    expect(activityLevel(today!.sessions)).toBe(2);
+    expect(formatHours(5400)).toBe('1 h 30 min');
+    expect(formatHours(5400, 'tr')).toBe('1 sa 30 dk');
+    const weeks = heatmapWeeks(range, days);
+    expect(weeks).toHaveLength(53);
+    expect(weeks.every((week) => week.length === 7)).toBe(true);
+    expect(new Date(`${weeks[0][0].date}T00:00:00`).getDay()).toBe(0);
+    expect(new Date(`${weeks[0][6].date}T00:00:00`).getDay()).toBe(6);
+    expect(weeks.flat().some((day) => day.sessions === 2)).toBe(true);
+    const labels = monthLabels(weeks, 'en');
+    expect(labels[0]?.label).toMatch(/Oct|Nov/);
+    expect(labels.every((label, index) => index === 0 || label.index - labels[index - 1].index >= 3)).toBe(true);
+  });
 });

@@ -4,7 +4,7 @@ use crate::{
         history_repository::HistoryRepository, repository_error::RepositoryError,
         session_repository::RepositoryFuture,
     },
-    domain::history::{SeriesPoint, SessionRecord},
+    domain::history::{ActivityEntry, SeriesPoint, SessionRecord},
 };
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -38,6 +38,7 @@ struct PointRow {
 impl HistoryRepository for PgSessionRepository {
     fn sessions_page(
         &self,
+        owner: Uuid,
         before: Option<Uuid>,
         limit: u32,
     ) -> RepositoryFuture<'_, Vec<SessionRecord>> {
@@ -45,12 +46,13 @@ impl HistoryRepository for PgSessionRepository {
             // An unknown cursor makes the row comparison NULL, which yields no rows.
             let rows: Vec<RecordRow> = sqlx::query_as(
                 "SELECT id, request_id, started_at, finished_at, ftp_w FROM training_session \
-                WHERE ($1::uuid IS NULL OR (started_at, id) < \
-                    (SELECT started_at, id FROM training_session WHERE id = $1)) \
+                WHERE member_id = $3 AND ($1::uuid IS NULL OR (started_at, id) < \
+                    (SELECT started_at, id FROM training_session WHERE id = $1 AND member_id = $3)) \
                 ORDER BY started_at DESC, id DESC LIMIT $2",
             )
             .bind(before)
             .bind(i64::from(limit))
+            .bind(owner)
             .fetch_all(&self.pool)
             .await
             .map_err(repository_error)?;
@@ -58,13 +60,14 @@ impl HistoryRepository for PgSessionRepository {
         })
     }
 
-    fn session_record(&self, id: Uuid) -> RepositoryFuture<'_, Option<SessionRecord>> {
+    fn session_record(&self, owner: Uuid, id: Uuid) -> RepositoryFuture<'_, Option<SessionRecord>> {
         Box::pin(async move {
             let row: Option<RecordRow> = sqlx::query_as(
                 "SELECT id, request_id, started_at, finished_at, ftp_w \
-                FROM training_session WHERE id = $1",
+                FROM training_session WHERE id = $1 AND member_id = $2",
             )
             .bind(id)
+            .bind(owner)
             .fetch_optional(&self.pool)
             .await
             .map_err(repository_error)?;
@@ -107,6 +110,36 @@ impl HistoryRepository for PgSessionRepository {
                 });
             }
             Ok(result)
+        })
+    }
+
+    fn activity(
+        &self,
+        owner: Uuid,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> RepositoryFuture<'_, Vec<ActivityEntry>> {
+        Box::pin(async move {
+            let rows: Vec<(DateTime<Utc>, i64)> = sqlx::query_as(
+                "SELECT started_at, \
+                GREATEST(0, floor(extract(epoch from (coalesce(finished_at, clock_timestamp()) - started_at))))::bigint \
+                FROM training_session \
+                WHERE member_id = $1 AND started_at >= $2 AND started_at < $3 \
+                ORDER BY started_at",
+            )
+            .bind(owner)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(repository_error)?;
+            Ok(rows
+                .into_iter()
+                .map(|(started_at, duration_seconds)| ActivityEntry {
+                    started_at,
+                    duration_seconds,
+                })
+                .collect())
         })
     }
 }

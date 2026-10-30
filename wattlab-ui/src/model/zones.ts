@@ -1,5 +1,7 @@
 export const DEFAULT_FTP_W = 200;
 export const ZONE_COLORS = ['#b3bcb2', '#9aa6b2', '#55b8f3', '#79d68b', '#ebd35e', '#f5a15e', '#f17474'];
+export const ZONE_NAME_KEYS = ['zone0', 'zone1', 'zone2', 'zone3', 'zone4', 'zone5', 'zone6'] as const;
+/** Turkish labels kept for tests and fallbacks; screens use i18n. */
 export const ZONE_NAMES = ['Boşta', 'Toparlanma', 'Dayanıklılık', 'Tempo', 'Eşik', 'Yüksek yoğunluk', 'Anaerobik'];
 export const ZONE_RANGES = ['0 W', '<%60', '%60–<76', '%76–<90', '%90–<105', '%105–<119', '≥%119'];
 const LIMITS = [60, 76, 90, 105, 119];

@@ -130,7 +130,8 @@ async fn live_api_requires_bearer_and_empty_storage_is_an_explicit_empty_view() 
         .await
         .unwrap();
     assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
-    let response = app
+    let agent = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/v1/live")
@@ -138,6 +139,18 @@ async fn live_api_requires_bearer_and_empty_storage_is_an_explicit_empty_view() 
                     "authorization",
                     "Bearer test-only-token-for-integration-tests",
                 )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+    let token = support::member_token(&app).await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/live")
+                .header("authorization", format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
         )

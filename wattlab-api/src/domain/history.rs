@@ -51,6 +51,13 @@ pub struct SessionRecord {
     pub ftp_w: Option<i32>,
 }
 
+/// One ride in a calendar window. The screen groups these by the local day.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityEntry {
+    pub started_at: DateTime<Utc>,
+    pub duration_seconds: i64,
+}
+
 pub fn summarize(
     session: &Session,
     points: &[SeriesPoint],

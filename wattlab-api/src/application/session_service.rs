@@ -16,18 +16,19 @@ impl SessionService {
         Self { repository }
     }
 
-    pub async fn start(&self, request_id: Uuid) -> Result<Session, ApplicationError> {
-        Ok(self.repository.start_or_get(request_id).await?)
+    pub async fn start(&self, request_id: Uuid, owner: Uuid) -> Result<Session, ApplicationError> {
+        Ok(self.repository.start_or_get(request_id, owner).await?)
     }
-    pub async fn get(&self, id: Uuid) -> Result<Session, ApplicationError> {
+    /// `scope: Some(member)` hides other members' sessions as not found.
+    pub async fn get(&self, id: Uuid, scope: Option<Uuid>) -> Result<Session, ApplicationError> {
         self.repository
-            .find(id)
+            .find(id, scope)
             .await?
             .ok_or(ApplicationError::SessionNotFound)
     }
-    pub async fn finish(&self, id: Uuid) -> Result<Session, ApplicationError> {
+    pub async fn finish(&self, id: Uuid, scope: Option<Uuid>) -> Result<Session, ApplicationError> {
         self.repository
-            .finish_once(id)
+            .finish_once(id, scope)
             .await?
             .ok_or(ApplicationError::SessionNotFound)
     }
@@ -47,15 +48,17 @@ impl SessionService {
     }
     pub async fn live(
         &self,
+        member: Uuid,
     ) -> Result<Option<crate::domain::live::LiveSnapshot>, ApplicationError> {
-        Ok(self.repository.live_snapshot(None).await?)
+        Ok(self.repository.live_snapshot(member, None).await?)
     }
     pub async fn live_session(
         &self,
+        member: Uuid,
         id: Uuid,
     ) -> Result<crate::domain::live::LiveSnapshot, ApplicationError> {
         self.repository
-            .live_snapshot(Some(id))
+            .live_snapshot(member, Some(id))
             .await?
             .ok_or(ApplicationError::SessionNotFound)
     }

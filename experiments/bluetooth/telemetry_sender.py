@@ -28,15 +28,18 @@ def validate_local_api(base_url, token):
 
 
 class TelemetrySender:
-    def __init__(self, base_url, token, *, capacity=512, max_retries=4,
+    def __init__(self, base_url, token, *, command_id=None, capacity=512, max_retries=4,
                  retry_delay=1.0, timeout=2.0, shutdown_timeout=5.0):
         validate_local_api(base_url, token)
         if (type(capacity) is not int or capacity < 1 or type(max_retries) is not int or max_retries < 0
                 or any(not math.isfinite(value) or value <= 0
                        for value in (retry_delay, timeout, shutdown_timeout))):
             raise ValueError("Invalid sender limits")
+        if command_id is not None:
+            UUID(str(command_id))
         self.base_url = base_url.rstrip('/')
         self.token = token
+        self.command_id = str(command_id) if command_id is not None else None
         self.queue = asyncio.Queue(maxsize=capacity)
         self.max_retries = max_retries
         self.retry_delay = retry_delay
@@ -65,7 +68,10 @@ class TelemetrySender:
         """Create the session now instead of on the first event, so a session
         started before the trainer streams is still visible."""
         if self.session_id is None:
-            result = await self._request('/api/v1/sessions', {"request_id": self.request_id})
+            body = {"request_id": self.request_id}
+            if self.command_id:
+                body["command_id"] = self.command_id
+            result = await self._request('/api/v1/sessions', body)
             try:
                 self.session_id = str(UUID(result['id']))
             except (KeyError, TypeError, ValueError, AttributeError) as exc:

@@ -1,4 +1,5 @@
 use super::{
+    auth::{AgentOnly, MemberId},
     dto::{
         AgentResponse, CommandRequest, CommandResponse, CommandResultRequest, HeartbeatRequest,
         NextQuery, ResultStatus,
@@ -21,25 +22,31 @@ use std::time::Duration;
 use uuid::Uuid;
 
 pub(super) async fn submit(
+    MemberId(member): MemberId,
     State(service): State<CommandService>,
     payload: Result<Json<CommandRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<CommandResponse>), ApiError> {
     let Json(request) = payload.map_err(|_| ApiError::InvalidRequest)?;
     let kind = request.try_into().map_err(|_| ApiError::InvalidRequest)?;
-    Ok((StatusCode::ACCEPTED, Json(service.submit(kind).into())))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(service.submit(kind, member).await?.into()),
+    ))
 }
 
 pub(super) async fn get(
+    MemberId(member): MemberId,
     State(service): State<CommandService>,
     Path(id): Path<String>,
 ) -> Result<Json<CommandResponse>, ApiError> {
     let id = Uuid::parse_str(&id).map_err(|_| ApiError::InvalidRequest)?;
-    Ok(Json(service.get(id)?.into()))
+    Ok(Json(service.get(id, Some(member))?.into()))
 }
 
 /// Long poll for the agent. Returns 204 when nothing arrived in time or the
 /// API is shutting down.
 pub(super) async fn next(
+    _: AgentOnly,
     State(service): State<CommandService>,
     State(shutdown): State<Shutdown>,
     query: Result<Query<NextQuery>, QueryRejection>,
@@ -65,6 +72,7 @@ pub(super) async fn next(
 }
 
 pub(super) async fn result(
+    _: AgentOnly,
     State(service): State<CommandService>,
     Path(id): Path<String>,
     payload: Result<Json<CommandResultRequest>, JsonRejection>,
@@ -78,6 +86,7 @@ pub(super) async fn result(
 }
 
 pub(super) async fn heartbeat(
+    _: AgentOnly,
     State(service): State<CommandService>,
     payload: Result<Json<HeartbeatRequest>, JsonRejection>,
 ) -> Result<StatusCode, ApiError> {

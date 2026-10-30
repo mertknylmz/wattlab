@@ -23,7 +23,7 @@ def main():
     if options.offline:
         command.append('--offline')
     if options.integration:
-        command.extend(['--test', 'postgres', '--', '--ignored'])
+        command.extend(['--test', 'postgres', '--', '--ignored', '--test-threads=1'])
     os.chdir(root / 'wattlab-api')
     os.execvpe(cargo, command, os.environ)
 

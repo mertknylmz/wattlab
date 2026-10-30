@@ -59,11 +59,13 @@ fn stub(records: Vec<SessionRecord>) -> Arc<support::StubRepository> {
 }
 
 async fn get(repository: Arc<support::StubRepository>, path: &str) -> (StatusCode, Value) {
-    let response = build_router(ApiToken::parse(TOKEN).unwrap(), repository)
+    let app = build_router(ApiToken::parse(TOKEN).unwrap(), repository);
+    let token = support::member_token(&app).await;
+    let response = app
         .oneshot(
             Request::builder()
                 .uri(path)
-                .header("Authorization", format!("Bearer {TOKEN}"))
+                .header("Authorization", format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -116,6 +118,9 @@ async fn invalid_queries_unknown_sessions_and_storage_failures_are_mapped() {
         "/api/v1/sessions?limit=abc",
         "/api/v1/sessions?before=nope",
         "/api/v1/sessions/nope/summary",
+        "/api/v1/activity",
+        "/api/v1/activity?from=nope&to=2026-01-01T00:00:00Z",
+        "/api/v1/activity?from=2026-01-01T00:00:00Z&to=2026-01-01T00:00:00Z",
     ] {
         assert_eq!(
             get(stub(vec![]), path).await.0,
@@ -133,13 +138,29 @@ async fn invalid_queries_unknown_sessions_and_storage_failures_are_mapped() {
     );
 }
 
+#[tokio::test]
+async fn activity_lists_rides_in_the_requested_window() {
+    let records = vec![record(1_700_000_000), record(1_800_000_000)];
+    let (status, body) = get(
+        stub(records),
+        "/api/v1/activity?from=2023-01-01T00:00:00Z&to=2024-01-01T00:00:00Z",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let entries = body["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["duration_seconds"], 60);
+}
+
 async fn put_settings(body: &str) -> (StatusCode, Value) {
-    let response = build_router(ApiToken::parse(TOKEN).unwrap(), stub(vec![]))
+    let app = build_router(ApiToken::parse(TOKEN).unwrap(), stub(vec![]));
+    let token = support::member_token(&app).await;
+    let response = app
         .oneshot(
             Request::builder()
                 .method("PUT")
                 .uri("/api/v1/settings")
-                .header("Authorization", format!("Bearer {TOKEN}"))
+                .header("Authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(body.to_owned()))
                 .unwrap(),

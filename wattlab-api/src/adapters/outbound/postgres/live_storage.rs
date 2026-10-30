@@ -27,6 +27,7 @@ struct LiveRow {
 }
 pub(super) async fn snapshot(
     pool: &PgPool,
+    owner: Uuid,
     session_id: Option<Uuid>,
 ) -> Result<Option<LiveSnapshot>, RepositoryError> {
     // One statement gives a consistent MVCC snapshot, including concurrent finish.
@@ -37,7 +38,7 @@ pub(super) async fn snapshot(
         SELECT s.*, c.state, clock_timestamp() AS captured_at,
                f.received_at AS ftms_received, f.speed_kmh, f.cadence_rpm, f.power_w AS ftms_power,
                p.received_at AS cycling_received, p.power_w AS cycling_power
-        FROM (SELECT * FROM training_session WHERE ($1::uuid IS NULL OR id=$1) ORDER BY started_at DESC,id DESC LIMIT 1) s
+        FROM (SELECT * FROM training_session WHERE member_id=$2 AND ($1::uuid IS NULL OR id=$1) ORDER BY started_at DESC,id DESC LIMIT 1) s
         LEFT JOIN LATERAL (
             SELECT stream_id FROM connection_event WHERE session_id=s.id AND received_at IS NOT NULL
             GROUP BY stream_id ORDER BY min(received_at) DESC, stream_id DESC LIMIT 1
@@ -61,7 +62,7 @@ pub(super) async fn snapshot(
         ) p ON true
     "#,
     )
-    .bind(session_id).fetch_optional(pool)
+    .bind(session_id).bind(owner).fetch_optional(pool)
     .await
     .map_err(repository_error)?;
     row.map(|r| {

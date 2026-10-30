@@ -1,9 +1,14 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ApiClient } from '../api/client';
+import { AppearanceProvider } from '../i18n/appearance';
 import { LivePage } from './LivePage';
 
-afterEach(cleanup);
+afterEach(() => {
+  localStorage.clear();
+  document.documentElement.removeAttribute('data-theme');
+  cleanup();
+});
 
 function setup() {
   let push: (text: string) => void = () => {};
@@ -16,14 +21,16 @@ function setup() {
   let clock = 0;
   const onOnline = vi.fn();
   render(
-    <LivePage
-      client={new ApiClient(fetcher)}
-      ftp={200}
-      ftpIsDefault
-      now={() => clock}
-      onUnauthorized={() => {}}
-      onOnline={onOnline}
-    />,
+    <AppearanceProvider>
+      <LivePage
+        client={new ApiClient(fetcher)}
+        ftp={200}
+        ftpIsDefault
+        now={() => clock}
+        onUnauthorized={() => {}}
+        onOnline={onOnline}
+      />
+    </AppearanceProvider>,
   );
   const send = async (power: number | null, finished = false) => {
     const at = new Date().toISOString();
@@ -63,13 +70,13 @@ it('shows live values with zone and keeps a real zero before finish', async () =
   live.tick(1100);
   await live.send(0, true);
   expect(screen.getByTestId('power').textContent).toBe('—');
-  expect(screen.getByTestId('trainer-status').textContent).toBe('Oturum tamamlandı');
+  expect(screen.getByTestId('trainer-status').textContent).toBe('Session finished');
   expect(screen.getByTestId('power-chart').querySelectorAll('polyline')).toHaveLength(1);
 });
 
 it('says the agent is not running and disables commands', async () => {
   const live = setup();
   await live.send(100);
-  expect(screen.getByText(/Trainer ajanı çalışmıyor/)).toBeTruthy();
-  expect((screen.getByRole('button', { name: 'Trainer’a bağlan' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/Trainer agent is not running/)).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Connect trainer' }) as HTMLButtonElement).disabled).toBe(true);
 });

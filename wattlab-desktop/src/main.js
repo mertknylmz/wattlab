@@ -5,7 +5,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { app, BrowserWindow, net, protocol, session } = require('electron');
+const { app, BrowserWindow, net, protocol, safeStorage, session } = require('electron');
 const {
   LaunchError,
   freePort,
@@ -18,6 +18,7 @@ const {
   waitReady,
 } = require('./processes');
 const { ORIGIN, createHandler } = require('./renderer-protocol');
+const { createSessionStore, sessionFile } = require('./session-store');
 
 // API, Python agent and PostgreSQL are not bundled yet, so a packaged build
 // needs WATTLAB_ROOT pointing at a prepared WattLab checkout.
@@ -27,7 +28,16 @@ const ROOT = process.env.WATTLAB_ROOT
     ? null
     : path.resolve(__dirname, '..', '..');
 const RENDERER = path.join(__dirname, '..', 'renderer');
-const state = { api: null, agent: null, origin: null, token: null, window: null, quitting: false, stopped: false };
+const state = {
+  api: null,
+  agent: null,
+  origin: null,
+  agentToken: null,
+  memberToken: null,
+  window: null,
+  quitting: false,
+  stopped: false,
+};
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'wattlab', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
@@ -35,6 +45,15 @@ protocol.registerSchemesAsPrivileged([
 
 function log(line) {
   console.log(line);
+}
+
+function store() {
+  return createSessionStore({
+    fs,
+    path,
+    safeStorage,
+    file: sessionFile(app.getPath('userData'), path),
+  });
 }
 
 function showStatus(message, error = false) {
@@ -57,7 +76,6 @@ function createWindow() {
       webSecurity: true,
     },
   });
-  // Only the bundled screens and the local status page may be shown.
   window.webContents.on('will-navigate', (event, url) => {
     const target = new URL(url);
     if (target.protocol === 'file:' || target.origin === ORIGIN) return;
@@ -67,13 +85,41 @@ function createWindow() {
   return window;
 }
 
+async function restoreMember(origin, persist) {
+  const token = persist.load();
+  if (!token) return;
+  try {
+    const response = await net.fetch(`${origin}/api/v1/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.ok) state.memberToken = token;
+    else persist.clear();
+  } catch {
+    persist.clear();
+  }
+}
+
 async function start() {
+  const persist = store();
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   protocol.handle(
     'wattlab',
     createHandler({
       rendererDir: RENDERER,
-      api: () => (state.origin && state.token ? { origin: state.origin, token: state.token } : null),
+      api: () => (state.origin ? { origin: state.origin } : null),
+      session: {
+        token: () => state.memberToken,
+        set(token, remember) {
+          state.memberToken = token;
+          if (remember) persist.save(token);
+          else persist.clear();
+        },
+        clear() {
+          state.memberToken = null;
+          persist.clear();
+        },
+        rememberAvailable: () => persist.available(),
+      },
       fetch: (url, init) => net.fetch(url, init),
     }),
   );
@@ -98,28 +144,28 @@ async function start() {
     showStatus('Yerel veritabanı hazırlanıyor…');
     await runStep('database', paths.python, [paths.localDb, 'start'], { cwd: ROOT, env: process.env, log });
 
-    const token = generateToken();
+    const agentToken = generateToken();
     const port = await freePort();
     const origin = `http://127.0.0.1:${port}`;
     const env = {
       ...process.env,
       WATTLAB_API_PORT: String(port),
-      WATTLAB_API_TOKEN: token,
+      WATTLAB_AGENT_TOKEN: agentToken,
       WATTLAB_API_URL: origin,
       WATTLAB_ENV_FILE: paths.envFile,
     };
-    const owned = { cwd: ROOT, env, secrets: [token], log };
+    const owned = { cwd: ROOT, env, secrets: [agentToken], log };
 
     showStatus('WattLab API başlatılıyor…');
     state.api = spawnOwned('api', paths.api, [], owned);
-    await waitReady(state.api, origin, token);
+    await waitReady(state.api, origin, agentToken);
     state.origin = origin;
-    state.token = token;
+    state.agentToken = agentToken;
+    await restoreMember(origin, persist);
     state.api.exited.then(() => {
       if (!state.quitting) showStatus('WattLab API beklenmedik şekilde durdu. Uygulamayı yeniden başlat.', true);
     });
 
-    // The agent only touches Bluetooth after the user presses "connect" on the screen.
     if (process.env.WATTLAB_DESKTOP_TRAINER !== '0') {
       state.agent = spawnOwned('agent', paths.python, ['-u', paths.agent], owned);
       state.agent.exited.then(() => {
@@ -134,7 +180,6 @@ async function start() {
   }
 }
 
-/** Agent first so it can finish the session and release the trainer while the API is up. */
 async function shutdown() {
   for (const [name, child] of [['agent', state.agent], ['api', state.api]]) {
     if (child && running(child)) log(`[desktop] ${name}: ${await stopOwned(child)}`);

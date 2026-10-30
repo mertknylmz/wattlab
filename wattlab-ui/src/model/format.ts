@@ -1,8 +1,9 @@
-const number = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 1 });
-const date = new Intl.DateTimeFormat('tr-TR', { dateStyle: 'medium', timeStyle: 'short' });
+import type { Locale } from '../i18n/messages';
 
-export function formatNumber(value: number | null | undefined): string {
-  return value == null ? '—' : number.format(value);
+const TAG: Record<Locale, string> = { tr: 'tr-TR', en: 'en-GB' };
+
+export function formatNumber(value: number | null | undefined, locale: Locale = 'en'): string {
+  return value == null ? '—' : new Intl.NumberFormat(TAG[locale], { maximumFractionDigits: 1 }).format(value);
 }
 
 export function formatDuration(seconds: number | null | undefined): string {
@@ -14,6 +15,6 @@ export function formatDuration(seconds: number | null | undefined): string {
   return hours ? `${hours}:${minutes}:${rest}` : `${minutes}:${rest}`;
 }
 
-export function formatDate(iso: string): string {
-  return date.format(new Date(iso));
+export function formatDate(iso: string, locale: Locale = 'en'): string {
+  return new Intl.DateTimeFormat(TAG[locale], { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
 }

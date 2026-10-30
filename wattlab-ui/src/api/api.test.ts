@@ -28,6 +28,14 @@ describe('ApiClient', () => {
     expect(failure).toMatchObject({ status: 404 });
   });
 
+  it('asks for activity in a calendar window', async () => {
+    const fetcher = vi.fn().mockResolvedValue(json({ entries: [] }));
+    await new ApiClient(fetcher).activity('2026-01-01T00:00:00.000Z', '2026-12-31T00:00:00.000Z');
+    expect(fetcher.mock.calls[0][0]).toBe(
+      '/api/v1/activity?from=2026-01-01T00%3A00%3A00.000Z&to=2026-12-31T00%3A00%3A00.000Z',
+    );
+  });
+
   it('sends target power only with the ERG command', async () => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(json({})));
     const client = new ApiClient(fetcher);

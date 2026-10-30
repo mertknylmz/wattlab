@@ -17,4 +17,9 @@ pub(super) use agent::{
 mod settings;
 pub(super) use settings::{SettingsResponse, UpdateSettingsRequest};
 mod history;
-pub(super) use history::{PageQuery, SeriesResponse, SessionPageResponse, SessionSummaryResponse};
+pub(super) use history::{
+    ActivityQuery, ActivityResponse, PageQuery, SeriesResponse, SessionPageResponse,
+    SessionSummaryResponse,
+};
+mod account;
+pub(super) use account::{AuthResponse, CredentialsRequest, MemberResponse};

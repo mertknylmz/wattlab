@@ -1,8 +1,9 @@
-//! Local shared-token authentication, compatible with the Python sender.
+//! Service credential of the local trainer agent. Member login tokens are domain types.
 
 use std::{fmt, sync::Arc};
 use subtle::ConstantTimeEq;
 
+/// Service credential of the local trainer agent (`WATTLAB_AGENT_TOKEN`).
 #[derive(Clone)]
 pub struct ApiToken(Arc<str>);
 

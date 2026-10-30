@@ -50,9 +50,19 @@ API istekleri uygulamanın ana sürecinden geçer, anahtarı ana süreç ekler. 
 içindeki anahtar değişmez. Ajanı başlatmamak için `WATTLAB_DESKTOP_TRAINER=0 npm start`.
 API kodunu değiştirdiysen önce `cargo build` çalıştır.
 
+İlk açılışta **Giriş / Kayıt ol** ekranı gelir (kullanıcı adı + şifre). “Beni
+hatırla” işaretliyse ve işletim sistemi şifreli depolama sunuyorsa (Linux’ta
+anahtarlık) sonraki açılışta giriş atlanır. Aktif bir antrenman varken çıkış
+engellenir. Ekranlar API anahtarı görmez ve sormaz.
+
 Ekranlar: **Canlı görünüm** (anlık değerler, son 60 saniyelik güç grafiği, trainer
 kontrolleri), **Geçmiş** (kayıtlı oturumlar ve özetleri), oturum detayı (saniyelik
-güç grafiği, ortalamalar, iş/kJ, zon dağılımı) ve **Ayarlar** (FTP).
+güç grafiği, ortalamalar, iş/kJ, zon dağılımı), **Profil** (yıllık antrenman
+takvimi: gün başına antrenman sayısı ve süre) ve **Ayarlar** (FTP, Bluetooth
+bağlan/kes). Profil, Ayarlar ve Çıkış sol panelin altındadır; uzun sayfada yalnızca
+sağ taraf kayar. Aynı yerde TR/EN ve koyu/açık tema vardır; varsayılan
+dil İngilizce’dir, tercih `localStorage` ile bu bilgisayarda kalır (veritabanına
+yazılmaz). Profil takvimi Pazar’dan Cumartesi’ye gider.
 
 ## Trainer paneli
 

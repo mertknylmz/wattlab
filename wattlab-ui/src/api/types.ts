@@ -73,6 +73,29 @@ export interface SessionSeries extends SessionSummary {
   points: SeriesPoint[];
 }
 
+export interface Member {
+  id: string;
+  username: string;
+}
+
+export interface AuthSession {
+  member: Member;
+  expires_at: string;
+}
+
+export interface DesktopCapabilities {
+  remember_available: boolean;
+}
+
+export interface ActivityEntry {
+  started_at: string;
+  duration_seconds: number;
+}
+
+export interface Activity {
+  entries: ActivityEntry[];
+}
+
 export interface Settings {
   ftp_w: number;
   ftp_is_default: boolean;

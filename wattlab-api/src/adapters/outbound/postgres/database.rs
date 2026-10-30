@@ -31,6 +31,14 @@ pub async fn connect_and_migrate(config: &DatabaseConfig) -> Result<PgPool, Data
         pool.close().await;
         return Err(DatabaseError::LegacySchema);
     }
+    if sqlx::query("CREATE SCHEMA IF NOT EXISTS member")
+        .execute(&pool)
+        .await
+        .is_err()
+    {
+        pool.close().await;
+        return Err(DatabaseError::Migration);
+    }
     if sqlx::migrate!("./migrations").run(&pool).await.is_err() {
         pool.close().await;
         return Err(DatabaseError::Migration);

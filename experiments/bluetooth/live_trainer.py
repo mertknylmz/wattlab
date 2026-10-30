@@ -34,7 +34,7 @@ async def main():
     events = TelemetryEvents()
     if api_url:
         from telemetry_sender import TelemetrySender
-        sender = TelemetrySender(api_url, os.getenv("WATTLAB_API_TOKEN", ""))
+        sender = TelemetrySender(api_url, os.getenv("WATTLAB_AGENT_TOKEN", ""))
         await sender.start()
 
     def bike(sender_char, data):

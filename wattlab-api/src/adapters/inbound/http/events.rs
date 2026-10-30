@@ -1,4 +1,5 @@
 use super::{
+    auth::AgentOnly,
     dto::{Accepted, Batch, ConnectionDto, MeasurementDto},
     error::ApiError,
 };
@@ -10,6 +11,7 @@ use axum::{
 use uuid::Uuid;
 
 pub(super) async fn telemetry(
+    _: AgentOnly,
     State(service): State<SessionService>,
     Path(id): Path<String>,
     payload: Result<Json<Batch<MeasurementDto>>, JsonRejection>,
@@ -22,6 +24,7 @@ pub(super) async fn telemetry(
     }))
 }
 pub(super) async fn connections(
+    _: AgentOnly,
     State(service): State<SessionService>,
     Path(id): Path<String>,
     payload: Result<Json<Batch<ConnectionDto>>, JsonRejection>,

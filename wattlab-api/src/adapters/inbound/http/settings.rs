@@ -1,4 +1,5 @@
 use super::{
+    auth::MemberId,
     dto::{SettingsResponse, UpdateSettingsRequest},
     error::ApiError,
 };
@@ -9,12 +10,14 @@ use axum::{
 };
 
 pub(super) async fn get(
+    MemberId(member): MemberId,
     State(service): State<SettingsService>,
 ) -> Result<Json<SettingsResponse>, ApiError> {
-    Ok(Json(service.get().await?.into()))
+    Ok(Json(service.get(member).await?.into()))
 }
 
 pub(super) async fn update(
+    MemberId(member): MemberId,
     State(service): State<SettingsService>,
     payload: Result<Json<UpdateSettingsRequest>, JsonRejection>,
 ) -> Result<Json<SettingsResponse>, ApiError> {
@@ -24,5 +27,5 @@ pub(super) async fn update(
         .map(Ftp::new)
         .transpose()
         .map_err(|_| ApiError::InvalidRequest)?;
-    Ok(Json(service.set_ftp(ftp).await?.into()))
+    Ok(Json(service.set_ftp(member, ftp).await?.into()))
 }

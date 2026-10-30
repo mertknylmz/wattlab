@@ -9,7 +9,7 @@ use std::{collections::HashMap, env, net::SocketAddr, path::PathBuf};
 #[derive(Debug, Clone)]
 pub struct Config {
     pub address: SocketAddr,
-    pub api_token: ApiToken,
+    pub agent_token: ApiToken,
 }
 
 pub(crate) fn environment_file() -> Result<HashMap<String, String>, ConfigError> {
@@ -48,7 +48,7 @@ impl Config {
         let mut process = HashMap::new();
         for (key, error) in [
             ("WATTLAB_API_PORT", ConfigError::InvalidPort),
-            ("WATTLAB_API_TOKEN", ConfigError::InvalidToken),
+            ("WATTLAB_AGENT_TOKEN", ConfigError::InvalidToken),
         ] {
             match env::var(key) {
                 Ok(value) => {
@@ -71,7 +71,7 @@ impl Config {
                 .or_else(|| file.get(key))
                 .map(String::as_str)
         };
-        Self::from_values(resolve("WATTLAB_API_PORT"), resolve("WATTLAB_API_TOKEN"))
+        Self::from_values(resolve("WATTLAB_API_PORT"), resolve("WATTLAB_AGENT_TOKEN"))
     }
 
     pub fn from_values(port: Option<&str>, token: Option<&str>) -> Result<Self, ConfigError> {
@@ -82,11 +82,11 @@ impl Config {
         if port == 0 {
             return Err(ConfigError::InvalidPort);
         }
-        let api_token = ApiToken::parse(token.ok_or(ConfigError::InvalidToken)?)
+        let agent_token = ApiToken::parse(token.ok_or(ConfigError::InvalidToken)?)
             .map_err(|_| ConfigError::InvalidToken)?;
         Ok(Self {
             address: SocketAddr::from(([127, 0, 0, 1], port)),
-            api_token,
+            agent_token,
         })
     }
 }
@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn process_settings_override_file_settings_including_invalid_empty_values() {
         let file = HashMap::from([
-            ("WATTLAB_API_TOKEN".into(), TOKEN.into()),
+            ("WATTLAB_AGENT_TOKEN".into(), TOKEN.into()),
             ("WATTLAB_API_PORT".into(), "9001".into()),
         ]);
         let process = HashMap::from([("WATTLAB_API_PORT".into(), "9002".into())]);
@@ -146,7 +146,7 @@ mod tests {
                 .port(),
             9002
         );
-        let process = HashMap::from([("WATTLAB_API_TOKEN".into(), "".into())]);
+        let process = HashMap::from([("WATTLAB_AGENT_TOKEN".into(), "".into())]);
         assert_eq!(
             Config::from_sources(&file, &process).unwrap_err(),
             ConfigError::InvalidToken

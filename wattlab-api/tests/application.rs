@@ -16,11 +16,11 @@ use wattlab_api::{
 async fn missing_sessions_are_application_errors_without_http_or_database() {
     let service = SessionService::new(Arc::new(StubRepository::default()));
     assert_eq!(
-        service.get(Uuid::new_v4()).await,
+        service.get(Uuid::new_v4(), None).await,
         Err(ApplicationError::SessionNotFound)
     );
     assert_eq!(
-        service.finish(Uuid::new_v4()).await,
+        service.finish(Uuid::new_v4(), None).await,
         Err(ApplicationError::SessionNotFound)
     );
 }
@@ -29,7 +29,7 @@ async fn missing_sessions_are_application_errors_without_http_or_database() {
 async fn repository_failures_are_mapped_without_driver_types() {
     let service = SessionService::new(support::unavailable_repository());
     assert_eq!(
-        service.start(Uuid::new_v4()).await,
+        service.start(Uuid::new_v4(), Uuid::nil()).await,
         Err(ApplicationError::StorageUnavailable)
     );
     for error in [RepositoryError::Unexpected, RepositoryError::InvalidData] {
@@ -39,7 +39,7 @@ async fn repository_failures_are_mapped_without_driver_types() {
             ..Default::default()
         }));
         assert_eq!(
-            service.get(Uuid::new_v4()).await,
+            service.get(Uuid::new_v4(), None).await,
             Err(ApplicationError::StorageFailure)
         );
     }
@@ -60,6 +60,6 @@ async fn service_returns_domain_values_through_the_port() {
         failure: None,
         ..Default::default()
     }));
-    assert_eq!(service.start(request).await.unwrap(), session);
-    assert_eq!(service.get(session.id()).await.unwrap(), session);
+    assert_eq!(service.start(request, Uuid::nil()).await.unwrap(), session);
+    assert_eq!(service.get(session.id(), None).await.unwrap(), session);
 }

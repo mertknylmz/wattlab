@@ -20,14 +20,20 @@ fn app() -> App {
     )
 }
 
-async fn call(app: &Router, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
+async fn call(
+    app: &Router,
+    token: &str,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
     let response = app
         .clone()
         .oneshot(
             Request::builder()
                 .method(method)
                 .uri(path)
-                .header("Authorization", format!("Bearer {TOKEN}"))
+                .header("Authorization", format!("Bearer {token}"))
                 .header("content-type", "application/json")
                 .body(body.map_or_else(Body::empty, |b| Body::from(b.to_string())))
                 .unwrap(),
@@ -45,8 +51,10 @@ async fn call(app: &Router, method: &str, path: &str, body: Option<Value>) -> (S
 #[tokio::test]
 async fn command_lifecycle_runs_from_submission_to_agent_result() {
     let app = app().router;
+    let member = support::member_token(&app).await;
     let (status, command) = call(
         &app,
+        &member,
         "POST",
         "/api/v1/agent/commands",
         Some(json!({"kind":"set_target_power","target_power_w":180})),
@@ -59,6 +67,7 @@ async fn command_lifecycle_runs_from_submission_to_agent_result() {
 
     let (status, delivered) = call(
         &app,
+        TOKEN,
         "GET",
         "/api/v1/agent/commands/next?wait_seconds=1",
         None,
@@ -70,7 +79,7 @@ async fn command_lifecycle_runs_from_submission_to_agent_result() {
         (Some(id), Some("delivered"))
     );
     assert_eq!(
-        call(&app, "GET", "/api/v1/agent/commands/next", None)
+        call(&app, TOKEN, "GET", "/api/v1/agent/commands/next", None)
             .await
             .0,
         StatusCode::NO_CONTENT
@@ -78,35 +87,55 @@ async fn command_lifecycle_runs_from_submission_to_agent_result() {
 
     let result = json!({"status":"rejected","message":"ERG not supported"});
     let path = format!("/api/v1/agent/commands/{id}/result");
-    let (status, done) = call(&app, "PUT", &path, Some(result.clone())).await;
+    let (status, done) = call(&app, TOKEN, "PUT", &path, Some(result.clone())).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(done["status"], "rejected");
     assert_eq!(
-        call(&app, "PUT", &path, Some(result)).await.0,
+        call(&app, TOKEN, "PUT", &path, Some(result)).await.0,
         StatusCode::OK
     );
     assert_eq!(
-        call(&app, "PUT", &path, Some(json!({"status":"succeeded"})))
-            .await
-            .0,
+        call(
+            &app,
+            TOKEN,
+            "PUT",
+            &path,
+            Some(json!({"status":"succeeded"}))
+        )
+        .await
+        .0,
         StatusCode::CONFLICT
     );
-    let (_, fetched) = call(&app, "GET", &format!("/api/v1/agent/commands/{id}"), None).await;
+    let (_, fetched) = call(
+        &app,
+        &member,
+        "GET",
+        &format!("/api/v1/agent/commands/{id}"),
+        None,
+    )
+    .await;
     assert_eq!(fetched["message"], "ERG not supported");
 }
 
 #[tokio::test]
 async fn invalid_commands_and_unknown_ids_are_rejected() {
     let app = app().router;
+    let member = support::member_token(&app).await;
     for body in [
         json!({"kind":"explode"}),
         json!({"kind":"set_target_power"}),
         json!({"kind":"set_target_power","target_power_w":2001}),
     ] {
         assert_eq!(
-            call(&app, "POST", "/api/v1/agent/commands", Some(body.clone()))
-                .await
-                .0,
+            call(
+                &app,
+                &member,
+                "POST",
+                "/api/v1/agent/commands",
+                Some(body.clone())
+            )
+            .await
+            .0,
             StatusCode::BAD_REQUEST,
             "{body}"
         );
@@ -114,6 +143,7 @@ async fn invalid_commands_and_unknown_ids_are_rejected() {
     assert_eq!(
         call(
             &app,
+            TOKEN,
             "GET",
             "/api/v1/agent/commands/next?wait_seconds=21",
             None
@@ -124,9 +154,15 @@ async fn invalid_commands_and_unknown_ids_are_rejected() {
     );
     let unknown = format!("/api/v1/agent/commands/{}/result", Uuid::new_v4());
     assert_eq!(
-        call(&app, "PUT", &unknown, Some(json!({"status":"succeeded"})))
-            .await
-            .0,
+        call(
+            &app,
+            TOKEN,
+            "PUT",
+            &unknown,
+            Some(json!({"status":"succeeded"}))
+        )
+        .await
+        .0,
         StatusCode::NOT_FOUND
     );
 }
@@ -134,18 +170,18 @@ async fn invalid_commands_and_unknown_ids_are_rejected() {
 #[tokio::test]
 async fn heartbeat_is_validated_and_reported_while_fresh() {
     let app = app().router;
-    let (_, before) = call(&app, "GET", "/api/v1/agent/status", None).await;
+    let (_, before) = call(&app, TOKEN, "GET", "/api/v1/agent/status", None).await;
     assert_eq!(before["online"], false);
     assert!(before["last_seen_at"].is_null());
     let beat = json!({"agent_id":Uuid::new_v4(),"connection_state":"streaming","session_id":null,
         "erg_supported":true,"power_range_w":[0,1500],"target_power_w":null});
     assert_eq!(
-        call(&app, "PUT", "/api/v1/agent/status", Some(beat))
+        call(&app, TOKEN, "PUT", "/api/v1/agent/status", Some(beat))
             .await
             .0,
         StatusCode::NO_CONTENT
     );
-    let (_, after) = call(&app, "GET", "/api/v1/agent/status", None).await;
+    let (_, after) = call(&app, TOKEN, "GET", "/api/v1/agent/status", None).await;
     assert_eq!(after["online"], true);
     assert_eq!(after["connection_state"], "streaming");
     assert_eq!(after["power_range_w"], json!([0, 1500]));
@@ -154,7 +190,7 @@ async fn heartbeat_is_validated_and_reported_while_fresh() {
         json!({"agent_id":Uuid::new_v4(),"connection_state":"idle","session_id":null,"erg_supported":false,"power_range_w":[500,100],"target_power_w":null}),
     ] {
         assert_eq!(
-            call(&app, "PUT", "/api/v1/agent/status", Some(invalid))
+            call(&app, TOKEN, "PUT", "/api/v1/agent/status", Some(invalid))
                 .await
                 .0,
             StatusCode::BAD_REQUEST
@@ -165,11 +201,13 @@ async fn heartbeat_is_validated_and_reported_while_fresh() {
 #[tokio::test]
 async fn shutdown_releases_waiting_agents_and_ends_live_streams() {
     let App { router, shutdown } = app();
+    let member = support::member_token(&router).await;
     let waiting = tokio::spawn({
         let router = router.clone();
         async move {
             call(
                 &router,
+                TOKEN,
                 "GET",
                 "/api/v1/agent/commands/next?wait_seconds=20",
                 None,
@@ -183,7 +221,7 @@ async fn shutdown_releases_waiting_agents_and_ends_live_streams() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/live/stream")
-                .header("Authorization", format!("Bearer {TOKEN}"))
+                .header("Authorization", format!("Bearer {member}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -208,4 +246,46 @@ async fn shutdown_releases_waiting_agents_and_ends_live_streams() {
         "{text}"
     );
     assert!(text.contains("\"agent\":{\"online\":false"));
+}
+
+#[tokio::test]
+async fn members_steer_and_only_the_agent_executes() {
+    let app = app().router;
+    let member = support::member_token(&app).await;
+    let other = support::member_token(&app).await;
+    let connect = Some(json!({"kind":"connect"}));
+    let forbidden = call(
+        &app,
+        TOKEN,
+        "POST",
+        "/api/v1/agent/commands",
+        connect.clone(),
+    )
+    .await;
+    assert_eq!(forbidden.0, StatusCode::FORBIDDEN);
+    let (_, command) = call(&app, &member, "POST", "/api/v1/agent/commands", connect).await;
+    let path = format!("/api/v1/agent/commands/{}", command["id"].as_str().unwrap());
+    assert_eq!(
+        call(&app, &other, "GET", &path, None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        call(&app, &member, "GET", &path, None).await.0,
+        StatusCode::OK
+    );
+    for (method, agent_path) in [
+        ("GET", "/api/v1/agent/commands/next"),
+        ("PUT", "/api/v1/agent/status"),
+    ] {
+        let status = call(&app, &member, method, agent_path, Some(json!({})))
+            .await
+            .0;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{agent_path}");
+    }
+    assert_eq!(
+        call(&app, &member, "GET", "/api/v1/agent/status", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
 }

@@ -3,17 +3,19 @@ import type { ApiClient } from '../api/client';
 import { LiveStream } from '../api/liveStream';
 import type { AgentState } from '../api/types';
 import { PowerChart } from '../components/PowerChart';
+import { useAppearance } from '../i18n/appearance';
+import type { MessageKey } from '../i18n/messages';
 import { formatDuration, formatNumber } from '../model/format';
 import { PowerTrace, currentMetric, liveChart, type Reception } from '../model/live';
-import { ZONE_NAMES, powerZone } from '../model/zones';
+import { ZONE_NAME_KEYS, powerZone } from '../model/zones';
 import { TrainerPanel } from './TrainerPanel';
 
-const STATES: Record<string, string> = {
-  connecting: 'Bağlanıyor',
-  subscribing: 'Veri kanalları hazırlanıyor',
-  streaming: 'Veri bekleniyor',
-  retry_wait: 'Yeniden bağlantı bekleniyor',
-  stopped: 'Trainer dinleyicisi durdu',
+const STATES: Record<string, MessageKey> = {
+  connecting: 'connecting',
+  subscribing: 'subscribing',
+  streaming: 'waitingData',
+  retry_wait: 'retryWait',
+  stopped: 'listenerStopped',
 };
 
 interface Props {
@@ -28,6 +30,7 @@ interface Props {
 const monotonic = () => performance.now();
 
 export function LivePage({ client, ftp, ftpIsDefault, now = monotonic, onUnauthorized, onOnline }: Props) {
+  const { t, locale } = useAppearance();
   const [reception, setReception] = useState<Reception>({ snapshot: null, sampledAt: 0, online: false });
   const [agent, setAgent] = useState<AgentState | null>(null);
   const [, setTick] = useState(0);
@@ -41,7 +44,6 @@ export function LivePage({ client, ftp, ftpIsDefault, now = monotonic, onUnautho
         const time = now();
         const next: Reception = { snapshot: live, sampledAt: time, online: true };
         if (receptionRef.current.snapshot?.session?.id !== live.session?.id) trace.current.clear();
-        // Every received snapshot is sampled at once, including a zero just before finish.
         trace.current.record(time, currentMetric(next, 'power_w', time));
         receptionRef.current = next;
         setReception(next);
@@ -60,7 +62,6 @@ export function LivePage({ client, ftp, ftpIsDefault, now = monotonic, onUnautho
     });
     stream.start();
     const timer = setInterval(() => {
-      // Ages values and marks expiry as a gap; never invents measurements.
       trace.current.markGapIfExpired(now(), currentMetric(receptionRef.current, 'power_w', now()));
       setTick((tick) => tick + 1);
     }, 1000);
@@ -82,38 +83,40 @@ export function LivePage({ client, ftp, ftpIsDefault, now = monotonic, onUnautho
   const hasSamples = trace.current.samples.some((sample) => sample.value != null);
 
   const trainerStatus = !reception.online
-    ? 'Ekran bağlantısı yok'
+    ? t('noScreenLink')
     : !session
-      ? 'Trainer oturumu bekleniyor'
+      ? t('waitingTrainerSession')
       : session.finished_at
-        ? 'Oturum tamamlandı'
+        ? t('sessionFinished')
         : live
-          ? 'Canlı veri alınıyor'
-          : STATES[reception.snapshot?.connection_state ?? ''] ?? 'Bağlantı bilgisi bekleniyor';
+          ? t('liveReceiving')
+          : STATES[reception.snapshot?.connection_state ?? '']
+            ? t(STATES[reception.snapshot?.connection_state ?? ''])
+            : t('waitingConnection');
   const elapsed = session
     ? ((session.finished_at ? Date.parse(session.finished_at) : Date.now()) - Date.parse(session.started_at)) / 1000
     : null;
   const chartStatus =
     power === 0
-      ? '0 W ölçülüyor · çizgi sıfır seviyesinde devam eder.'
+      ? t('chartZero')
       : power != null
-        ? 'Canlı güç örnekleri · kesintiler birleştirilmez.'
+        ? t('chartLive')
         : session?.finished_at
-          ? 'Oturum tamamlandı · son gerçek ölçümde biter.'
+          ? t('chartFinished')
           : hasSamples
-            ? 'Güncel güç ölçümü yok · boşluk sıfır watt anlamına gelmez.'
-            : 'Güç ölçümü bekleniyor · yalnızca alınan değerler çizilir.';
+            ? t('chartGap')
+            : t('chartWaiting');
 
   return (
     <>
       <section className="page-heading">
         <div>
-          <p className="eyebrow">HER PEDALIN BİR KARŞILIĞI VAR</p>
-          <h1>Ritmini bul.</h1>
-          <p className="subtitle">Trainer verilerin, anlık ve tek bir yerde.</p>
+          <p className="eyebrow">{t('liveEyebrow')}</p>
+          <h1>{t('liveTitle')}</h1>
+          <p className="subtitle">{t('liveSubtitle')}</p>
         </div>
         <div className="time-block">
-          <span>OTURUM SÜRESİ</span>
+          <span>{t('sessionDuration')}</span>
           <strong data-testid="duration">{formatDuration(elapsed)}</strong>
         </div>
       </section>
@@ -130,73 +133,77 @@ export function LivePage({ client, ftp, ftpIsDefault, now = monotonic, onUnautho
             {trainerStatus}
           </strong>
           <span className="separator">/</span>
-          <span>{!session ? 'Henüz oturum yok' : session.finished_at ? 'Son oturum' : 'Aktif oturum'}</span>
+          <span>{!session ? t('noSessionYet') : session.finished_at ? t('lastSession') : t('activeSession')}</span>
         </div>
       </div>
-      <section className="metrics" aria-label="Canlı ölçümler">
+      <section className="metrics" aria-label={t('liveMetrics')}>
         <article className={`metric power${zone == null ? '' : ` zone-${zone}`}`} data-testid="power-card">
           <div className="metric-top">
-            <h2>GÜÇ</h2>
+            <h2>{t('power')}</h2>
             <span className="metric-icon">ϟ</span>
           </div>
           <div className="metric-number">
-            <strong data-testid="power">{formatNumber(power)}</strong>
+            <strong data-testid="power">{formatNumber(power, locale)}</strong>
             <span>W</span>
           </div>
           <div className="metric-foot">
             <span className="small-dot" />
             <span>
               {power == null
-                ? 'Güncel güç ölçümü yok'
+                ? t('noCurrentPower')
                 : reception.snapshot?.power_source === 'cycling_power'
-                  ? 'Cycling Power kaynağı'
-                  : 'FTMS kaynağı'}
+                  ? t('sourceCycling')
+                  : t('sourceFtms')}
             </span>
           </div>
           <div className="zone-info">
-            <strong data-testid="zone-label">{zone == null ? 'Zon —' : `Z${zone} · ${ZONE_NAMES[zone]}`}</strong>
+            <strong data-testid="zone-label">
+              {zone == null ? t('zoneNone') : `Z${zone} · ${t(ZONE_NAME_KEYS[zone])}`}
+            </strong>
             <span>
-              {power == null || power < 0 ? 'Güncel zon yok' : `%${formatNumber((power / ftp) * 100)} FTP`} ·{' '}
-              {ftpIsDefault ? `varsayılan ${ftp} W` : `FTP ${ftp} W`}
+              {power == null || power < 0
+                ? t('noCurrentZone')
+                : `%${formatNumber((power / ftp) * 100, locale)} FTP`}{' '}
+              · {ftpIsDefault ? t('defaultFtp', { ftp }) : t('ftpWatts', { ftp })}
             </span>
           </div>
         </article>
         <article className="metric">
           <div className="metric-top">
-            <h2>KADANS</h2>
+            <h2>{t('cadence')}</h2>
             <span className="metric-icon">↻</span>
           </div>
           <div className="metric-number">
-            <strong data-testid="cadence">{formatNumber(cadence)}</strong>
+            <strong data-testid="cadence">{formatNumber(cadence, locale)}</strong>
             <span>RPM</span>
           </div>
-          <div className="metric-foot">{cadence == null ? 'Güncel ölçüm yok' : 'FTMS · devir / dakika'}</div>
+          <div className="metric-foot">{cadence == null ? t('noCurrentReading') : t('cadenceFoot')}</div>
         </article>
         <article className="metric">
           <div className="metric-top">
-            <h2>HIZ</h2>
+            <h2>{t('speed')}</h2>
             <span className="metric-icon">↗</span>
           </div>
           <div className="metric-number">
-            <strong data-testid="speed">{formatNumber(speed)}</strong>
+            <strong data-testid="speed">{formatNumber(speed, locale)}</strong>
             <span>km/h</span>
           </div>
-          <div className="metric-foot">{speed == null ? 'Güncel ölçüm yok' : 'FTMS · kilometre / saat'}</div>
+          <div className="metric-foot">{speed == null ? t('noCurrentReading') : t('speedFoot')}</div>
         </article>
       </section>
       <section className="chart-card">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">PEDALININ İZİ</p>
-            <h2>Güç akışı</h2>
+            <p className="eyebrow">{t('chartEyebrow')}</p>
+            <h2>{t('chartTitle')}</h2>
           </div>
-          <span className="chart-caption">BU EKRANDAKİ SON 60 SANİYE</span>
+          <span className="chart-caption">{t('chartCaption')}</span>
         </div>
-        <PowerChart chart={chart} label="Son güç ölçümleri" empty="Ölçümler geldiğinde güç akışın burada görünecek." />
+        <PowerChart chart={chart} label={t('lastPower')} empty={t('chartEmpty')} />
         <div className="chart-axis">
-          <span>60 sn önce</span>
-          <span>{chart.drawable ? `${Math.floor(chart.min)}–${Math.ceil(chart.max)} W` : 'Ölçek otomatik'}</span>
-          <span>Şimdi</span>
+          <span>{t('sixtyAgo')}</span>
+          <span>{chart.drawable ? `${Math.floor(chart.min)}–${Math.ceil(chart.max)} W` : t('autoScale')}</span>
+          <span>{t('now')}</span>
         </div>
         <p className="chart-status" role="status" data-testid="chart-status">
           {chartStatus}

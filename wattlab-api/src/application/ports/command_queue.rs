@@ -13,7 +13,7 @@ pub enum CompleteError {
 /// Hand-off between user intent and the trainer agent. Commands are delivered at
 /// most once and expire rather than being replayed to a reconnected trainer.
 pub trait CommandQueue: Send + Sync {
-    fn submit(&self, kind: CommandKind) -> Command;
+    fn submit(&self, kind: CommandKind, issued_by: Uuid) -> Command;
     fn get(&self, id: Uuid) -> Option<Command>;
     /// Wait up to `wait` for the oldest pending command and mark it delivered.
     fn next(&self, wait: Duration) -> QueueFuture<'_, Option<Command>>;

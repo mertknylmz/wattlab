@@ -12,4 +12,5 @@ pub use startup_error::DatabaseError;
 mod event_storage;
 mod history_storage;
 mod live_storage;
+mod member_storage;
 mod settings_storage;

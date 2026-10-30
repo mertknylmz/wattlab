@@ -16,6 +16,9 @@ serde = { version = "1", features = ["derive"] }
 subtle = "2.6"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
 futures-util = { version = "0.3", default-features = false }
+argon2 = { version = "0.5", features = ["std"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+sha2 = "0.10"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi"] }
 
@@ -24,3 +27,10 @@ syn = { version = "2", features = ["full", "visit"] }
 http-body-util = "0.1"
 serde_json = "1"
 tower = { version = "0.5", features = ["util"] }
+
+# Password hashing is deliberately expensive; unoptimized builds would make
+# login and the account tests needlessly slow.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3

@@ -1,3 +1,4 @@
+mod account;
 mod agent;
 mod auth;
 mod dto;
@@ -14,8 +15,9 @@ pub use shutdown::Shutdown;
 
 use crate::{
     application::{
-        command_service::CommandService, history_service::HistoryService,
-        session_service::SessionService, settings_service::SettingsService,
+        auth_service::AuthService, command_service::CommandService,
+        history_service::HistoryService, session_service::SessionService,
+        settings_service::SettingsService,
     },
     auth::ApiToken,
 };
@@ -31,6 +33,7 @@ use error::ApiError;
 /// Application services shared by handlers; each handler extracts only its own.
 #[derive(Clone)]
 pub struct Services {
+    pub auth: AuthService,
     pub sessions: SessionService,
     pub history: HistoryService,
     pub settings: SettingsService,
@@ -48,6 +51,7 @@ macro_rules! sub_state {
     )*};
 }
 sub_state!(
+    auth: AuthService,
     sessions: SessionService,
     history: HistoryService,
     settings: SettingsService,
@@ -55,8 +59,19 @@ sub_state!(
     shutdown: Shutdown,
 );
 
-pub fn router(token: ApiToken, services: Services) -> Router {
+/// `agent_token` is the trainer agent's service credential; members use login tokens.
+pub fn router(agent_token: ApiToken, services: Services) -> Router {
+    let gate = auth::Gate {
+        agent: agent_token,
+        auth: services.auth.clone(),
+    };
+    let public = Router::new()
+        .route("/auth/register", post(account::register))
+        .route("/auth/login", post(account::login))
+        .with_state(services.clone());
     let api = Router::new()
+        .route("/auth/logout", post(account::logout))
+        .route("/auth/me", get(account::me))
         .route("/status", get(health::check))
         .route("/live", get(live::snapshot))
         .route("/live/stream", get(stream::live))
@@ -71,6 +86,7 @@ pub fn router(token: ApiToken, services: Services) -> Router {
         .route("/sessions/{id}", get(sessions::get))
         .route("/sessions/{id}/summary", get(history::summary))
         .route("/sessions/{id}/series", get(history::series))
+        .route("/activity", get(history::activity))
         .route("/sessions/{id}/finish", post(sessions::finish))
         .route("/sessions/{id}/telemetry", post(events::telemetry))
         .route(
@@ -79,10 +95,13 @@ pub fn router(token: ApiToken, services: Services) -> Router {
         )
         .fallback(not_found)
         .with_state(services)
-        .layer(middleware::from_fn_with_state(token, auth::require_token));
+        .layer(middleware::from_fn_with_state(
+            gate,
+            auth::require_principal,
+        ));
     Router::new()
         .route("/health", get(health::check))
-        .nest("/api/v1", api)
+        .nest("/api/v1", public.merge(api))
         .fallback(not_found)
 }
 

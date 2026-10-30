@@ -1,6 +1,11 @@
 import type {
+  Activity,
+  AgentState,
+  AuthSession,
   Command,
   CommandKind,
+  DesktopCapabilities,
+  Member,
   SessionPage,
   SessionSeries,
   SessionSummary,
@@ -13,7 +18,11 @@ const REQUEST_TIMEOUT_MS = 3000;
 export class UnauthorizedError extends Error {}
 /** The local API could not be reached or answered with an unexpected status. */
 export class ApiError extends Error {
-  constructor(readonly status: number | null, message = 'API unavailable') {
+  constructor(
+    readonly status: number | null,
+    readonly code?: string,
+    message = 'API unavailable',
+  ) {
     super(message);
   }
 }
@@ -30,7 +39,13 @@ export class ApiClient {
     return json ? { 'Content-Type': 'application/json' } : {};
   }
 
-  async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+    extraHeaders?: Record<string, string>,
+  ): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     const abort = () => controller.abort();
@@ -40,7 +55,7 @@ export class ApiClient {
       try {
         response = await this.fetcher(path, {
           method,
-          headers: this.headers(body !== undefined),
+          headers: { ...this.headers(body !== undefined), ...extraHeaders },
           body: body === undefined ? undefined : JSON.stringify(body),
           cache: 'no-store',
           credentials: 'omit',
@@ -50,7 +65,11 @@ export class ApiClient {
         throw new ApiError(null);
       }
       if (response.status === 401) throw new UnauthorizedError('Unauthorized');
-      if (!response.ok) throw new ApiError(response.status, `HTTP ${response.status}`);
+      if (response.status === 204) return undefined as T;
+      if (!response.ok) {
+        const parsed = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new ApiError(response.status, parsed.error, `HTTP ${response.status}`);
+      }
       return (await response.json()) as T;
     } finally {
       clearTimeout(timeout);
@@ -76,6 +95,33 @@ export class ApiClient {
     return response.body.getReader();
   }
 
+  capabilities() {
+    return this.request<DesktopCapabilities>('GET', '/api/v1/desktop/capabilities');
+  }
+  me() {
+    return this.request<Member>('GET', '/api/v1/auth/me');
+  }
+  register(username: string, password: string, remember: boolean) {
+    return this.request<AuthSession>(
+      'POST',
+      '/api/v1/auth/register',
+      { username, password },
+      undefined,
+      { 'X-WattLab-Remember': remember ? '1' : '0' },
+    );
+  }
+  login(username: string, password: string, remember: boolean) {
+    return this.request<AuthSession>(
+      'POST',
+      '/api/v1/auth/login',
+      { username, password },
+      undefined,
+      { 'X-WattLab-Remember': remember ? '1' : '0' },
+    );
+  }
+  logout() {
+    return this.request<void>('POST', '/api/v1/auth/logout');
+  }
   sessions(before?: string | null, limit = 20) {
     const query = new URLSearchParams({ limit: String(limit) });
     if (before) query.set('before', before);
@@ -86,6 +132,13 @@ export class ApiClient {
   }
   series(id: string) {
     return this.request<SessionSeries>('GET', `/api/v1/sessions/${encodeURIComponent(id)}/series`);
+  }
+  activity(from: string, to: string) {
+    const query = new URLSearchParams({ from, to });
+    return this.request<Activity>('GET', `/api/v1/activity?${query}`);
+  }
+  agent() {
+    return this.request<AgentState>('GET', '/api/v1/agent/status');
   }
   settings() {
     return this.request<Settings>('GET', '/api/v1/settings');

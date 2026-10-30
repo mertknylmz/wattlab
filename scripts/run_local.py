@@ -125,7 +125,7 @@ def main(argv=None):
             raise LaunchError('The API port is unavailable; stop your existing API or choose another port.') from None
         sys.path.insert(0, str(ROOT / 'experiments/bluetooth'))
         from telemetry_sender import TelemetrySender
-        TelemetrySender(origin, env.get('WATTLAB_API_TOKEN', ''))  # Validation only; no network/task.
+        TelemetrySender(origin, env.get('WATTLAB_AGENT_TOKEN', ''))  # Validation only; no network/task.
         cargo = shutil.which('cargo') or str(Path.home() / '.cargo/bin/cargo')
         if not Path(cargo).is_file():
             raise LaunchError('Cargo is missing; install the Rust toolchain first.')
@@ -139,7 +139,7 @@ def main(argv=None):
         if not target.is_absolute():
             target = ROOT / target
         api = spawn([str(target / 'debug/wattlab-api')], env)
-        wait_ready(api, origin, env['WATTLAB_API_TOKEN'], stopping)
+        wait_ready(api, origin, env['WATTLAB_AGENT_TOKEN'], stopping)
         if options.trainer:
             spawn([sys.executable, '-u', str(ROOT / 'experiments/bluetooth/trainer_agent.py')], env)
         print('API: ' + origin + '/api/v1 (Bearer token from local .env; not printed here).', flush=True)

@@ -1,3 +1,4 @@
+pub mod auth_service;
 pub mod command_service;
 pub mod error;
 pub mod history_service;

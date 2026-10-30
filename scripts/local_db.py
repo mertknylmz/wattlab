@@ -4,7 +4,7 @@ import getpass
 from pathlib import Path
 import secrets
 import subprocess
-from dotenv import dotenv_values, set_key
+from dotenv import dotenv_values, set_key, unset_key
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / '.wattlab'
@@ -32,7 +32,9 @@ def main():
     env_path = ROOT / '.env'
     settings = dotenv_values(env_path)
     # The helper owns only these dedicated development database names.
-    if settings.get('WATTLAB_DB_URL') not in (None, '', f'jdbc:postgresql://127.0.0.1:{PORT}/wattlab_dev', f'postgresql://127.0.0.1:{PORT}/wattlab_rust_dev'):
+    known = ('jdbc:postgresql://127.0.0.1:{}/wattlab_dev', 'postgresql://127.0.0.1:{}/wattlab_rust_dev',
+             'postgresql://127.0.0.1:{}/memberdb')
+    if settings.get('WATTLAB_DB_URL') not in (None, '', *(url.format(PORT) for url in known)):
         raise SystemExit('Existing database configuration is custom; leave it unchanged and configure manually.')
     password = settings.get('WATTLAB_DB_PASSWORD') or secrets.token_urlsafe(32)
     if not all(c.isascii() and (c.isalnum() or c in '_-') for c in password):
@@ -46,20 +48,28 @@ def main():
     if not exists("SELECT 1 FROM pg_roles WHERE rolname = 'wattlab_dev'"):
         subprocess.run(psql, input=f"CREATE ROLE wattlab_dev LOGIN PASSWORD '{password}';", text=True,
                        check=True, stdout=subprocess.DEVNULL)
-    for name in ('wattlab_rust_dev', 'wattlab_rust_test'):
+    # Earlier wattlab_rust_* databases are left untouched; all data now lives in memberdb.
+    for name in ('memberdb', 'memberdb_test'):
         if not exists(f"SELECT 1 FROM pg_database WHERE datname = '{name}'"):
             subprocess.run(psql, input=f'CREATE DATABASE {name} OWNER wattlab_dev;', text=True,
                            check=True, stdout=subprocess.DEVNULL)
+        subprocess.run([name if arg == 'postgres' else arg for arg in psql],
+                       input='SET client_min_messages = warning; CREATE SCHEMA IF NOT EXISTS member AUTHORIZATION wattlab_dev;',
+                       text=True, check=True, stdout=subprocess.DEVNULL)
     values = {
         'WATTLAB_API_URL': settings.get('WATTLAB_API_URL') or 'http://127.0.0.1:8080',
-        'WATTLAB_API_TOKEN': settings.get('WATTLAB_API_TOKEN') or secrets.token_urlsafe(32),
-        'WATTLAB_DB_URL': f'postgresql://127.0.0.1:{PORT}/wattlab_rust_dev',
+        # Service credential of the trainer agent; members log in with accounts.
+        'WATTLAB_AGENT_TOKEN': (settings.get('WATTLAB_AGENT_TOKEN') or settings.get('WATTLAB_API_TOKEN')
+                                or secrets.token_urlsafe(32)),
+        'WATTLAB_DB_URL': f'postgresql://127.0.0.1:{PORT}/memberdb',
         'WATTLAB_DB_USER': 'wattlab_dev', 'WATTLAB_DB_PASSWORD': password,
-        'WATTLAB_TEST_DB_URL': f'postgresql://127.0.0.1:{PORT}/wattlab_rust_test',
+        'WATTLAB_TEST_DB_URL': f'postgresql://127.0.0.1:{PORT}/memberdb_test',
         'WATTLAB_TEST_DB_USER': 'wattlab_dev', 'WATTLAB_TEST_DB_PASSWORD': password,
     }
     for key, value in values.items():
         set_key(env_path, key, value)
+    if 'WATTLAB_API_TOKEN' in settings:
+        unset_key(env_path, 'WATTLAB_API_TOKEN')
     env_path.chmod(0o600)
     print('Local database ready. Configuration is stored in ignored .env; no credentials displayed.')
 

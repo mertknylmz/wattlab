@@ -6,6 +6,8 @@ use uuid::Uuid;
 #[derive(Deserialize)]
 pub(crate) struct StartSessionRequest {
     pub request_id: Uuid,
+    /// The member's start-session command the agent is executing.
+    pub command_id: Uuid,
 }
 
 #[derive(Serialize)]

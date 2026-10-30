@@ -2,56 +2,69 @@ import { useState, type FormEvent } from 'react';
 import type { ApiClient } from '../api/client';
 import type { AgentState, CommandKind } from '../api/types';
 import { useCommand, type CommandState } from '../hooks/useCommand';
+import { useAppearance, type Translate } from '../i18n/appearance';
+import { interpolate, MESSAGES, type MessageKey } from '../i18n/messages';
 
-const ACTIONS: Record<CommandKind, string> = {
-  connect: 'Bağlantı',
-  disconnect: 'Bağlantıyı kesme',
-  start_session: 'Oturum başlatma',
-  finish_session: 'Oturum bitirme',
-  set_target_power: 'Hedef güç',
-  release_control: 'Direnci bırakma',
+const ACTIONS: Record<CommandKind, MessageKey> = {
+  connect: 'actionConnect',
+  disconnect: 'actionDisconnect',
+  start_session: 'actionStart',
+  finish_session: 'actionFinish',
+  set_target_power: 'actionTarget',
+  release_control: 'actionRelease',
 };
 
-const REASONS: Record<string, string> = {
-  session_already_active: 'zaten aktif bir oturum var',
-  no_active_session: 'aktif oturum yok',
-  session_not_created: 'oturum API’de oluşturulamadı',
-  trainer_not_configured: 'trainer adresi yapılandırılmamış',
-  erg_unavailable: 'trainer bağlı değil veya hedef gücü desteklemiyor',
-  target_out_of_range: 'hedef güç trainer aralığının dışında',
-  control_not_permitted: 'trainer kontrol iznini vermedi',
-  op_code_not_supported: 'trainer bu komutu desteklemiyor',
-  invalid_parameter: 'trainer değeri geçersiz buldu',
-  operation_failed: 'trainer işlemi tamamlayamadı',
-  control_failed: 'trainer yanıt vermedi',
-  disconnect_timeout: 'bağlantı süresinde kapanmadı',
+const REASONS: Record<string, MessageKey> = {
+  session_already_active: 'reasonSessionActive',
+  no_active_session: 'reasonNoSession',
+  session_not_created: 'reasonSessionNotCreated',
+  trainer_not_configured: 'reasonTrainerNotConfigured',
+  erg_unavailable: 'reasonErgUnavailable',
+  target_out_of_range: 'reasonTargetOutOfRange',
+  control_not_permitted: 'reasonControlNotPermitted',
+  op_code_not_supported: 'reasonOpUnsupported',
+  invalid_parameter: 'reasonInvalidParameter',
+  operation_failed: 'reasonOperationFailed',
+  control_failed: 'reasonControlFailed',
+  disconnect_timeout: 'reasonDisconnectTimeout',
 };
 
-const STATES: Record<string, string> = {
-  idle: 'Bağlı değil',
-  connecting: 'Bağlanıyor',
-  subscribing: 'Veri kanalları hazırlanıyor',
-  streaming: 'Bağlı · veri akıyor',
-  retry_wait: 'Yeniden bağlantı bekleniyor',
-  stopped: 'Durdu',
-  failed: 'Bağlantı başarısız · yeniden bağlanmayı dene',
+const STATES: Record<string, MessageKey> = {
+  idle: 'idle',
+  connecting: 'connecting',
+  subscribing: 'subscribing',
+  streaming: 'streaming',
+  retry_wait: 'retryWait',
+  stopped: 'stopped',
+  failed: 'failed',
 };
 
-export function describeCommand(state: CommandState | null): string {
-  if (!state) return 'Komutlar trainer ajanına iletilir; sonucu burada görünür.';
-  const action = ACTIONS[state.kind];
+const fallback: Translate = (key, values) => interpolate(MESSAGES.en[key], values);
+
+export function trainerConnectionLabel(agent: AgentState | null, t: Translate = fallback): string {
+  if (!agent?.online) return t('agentOffline');
+  const key = STATES[agent.connection_state ?? 'idle'];
+  return key ? t(key) : t('unknownState');
+}
+
+export function describeCommand(state: CommandState | null, t: Translate = fallback): string {
+  if (!state) return t('commandIdle');
+  const action = t(ACTIONS[state.kind]);
   switch (state.status) {
     case 'pending':
     case 'delivered':
-      return `${action} isteği gönderildi · trainer ajanının yanıtı bekleniyor.`;
+      return t('commandPending', { action });
     case 'succeeded':
-      return `${action} tamamlandı.`;
+      return t('commandSucceeded', { action });
     case 'rejected':
-      return `${action} reddedildi: ${REASONS[state.message ?? ''] ?? 'ajan nedeni bildirmedi'}.`;
+      return t('commandRejected', {
+        action,
+        reason: state.message && REASONS[state.message] ? t(REASONS[state.message]) : t('reasonUnknown'),
+      });
     case 'expired':
-      return `${action} zaman aşımına uğradı · trainer ajanı çalışmıyor olabilir.`;
+      return t('commandExpired', { action });
     default:
-      return `${action} isteği API’ye ulaşmadı.`;
+      return t('commandFailed', { action });
   }
 }
 
@@ -63,11 +76,13 @@ interface Props {
 }
 
 export function TrainerPanel({ client, agent, sessionActive, onUnauthorized }: Props) {
+  const { t } = useAppearance();
   const { state, submit, busy } = useCommand(client, onUnauthorized);
   const [target, setTarget] = useState('');
   const [targetError, setTargetError] = useState<string | null>(null);
   const online = agent?.online ?? false;
-  const connected = online && agent?.connection_state != null && agent.connection_state !== 'idle' && agent.connection_state !== 'failed';
+  const connected =
+    online && agent?.connection_state != null && agent.connection_state !== 'idle' && agent.connection_state !== 'failed';
   const streaming = online && agent?.connection_state === 'streaming';
   const erg = streaming && agent?.erg_supported;
   const range = agent?.power_range_w;
@@ -77,7 +92,7 @@ export function TrainerPanel({ client, agent, sessionActive, onUnauthorized }: P
     const watts = Number(target);
     const [min, max] = range ?? [0, 2000];
     if (!Number.isInteger(watts) || watts < min || watts > max) {
-      setTargetError(`Hedef için ${min}–${max} W arasında tam sayı gir.`);
+      setTargetError(t('targetOutOfRange', { min, max }));
       return;
     }
     setTargetError(null);
@@ -85,52 +100,55 @@ export function TrainerPanel({ client, agent, sessionActive, onUnauthorized }: P
   };
 
   return (
-    <section className="trainer-panel" aria-label="Trainer kontrolü">
+    <section className="trainer-panel" aria-label={t('trainerControl')}>
       <div className="panel-row">
         <div>
-          <h2>Trainer</h2>
+          <h2>{t('trainer')}</h2>
           <p role="status">
             {!online
-              ? 'Trainer ajanı çalışmıyor · başlatıcıyı --trainer ile ya da masaüstü uygulamasından aç.'
-              : STATES[agent?.connection_state ?? 'idle'] ?? 'Durum bilinmiyor'}
+              ? t('agentOfflineHint')
+              : STATES[agent?.connection_state ?? 'idle']
+                ? t(STATES[agent?.connection_state ?? 'idle'])
+                : t('unknownState')}
           </p>
         </div>
         <div className="panel-actions">
           {connected ? (
             <button type="button" className="secondary" disabled={busy} onClick={() => void submit('disconnect')}>
-              Bağlantıyı kes
+              {t('disconnect')}
             </button>
           ) : (
             <button type="button" disabled={busy || !online} onClick={() => void submit('connect')}>
-              Trainer’a bağlan
+              {t('connectTrainer')}
             </button>
           )}
           {sessionActive || agent?.session_id ? (
             <button type="button" className="secondary" disabled={busy || !online} onClick={() => void submit('finish_session')}>
-              Oturumu bitir
+              {t('finishSession')}
             </button>
           ) : (
             <button type="button" disabled={busy || !online} onClick={() => void submit('start_session')}>
-              Oturumu başlat
+              {t('startSession')}
             </button>
           )}
         </div>
       </div>
       <div className="panel-row erg">
         <div>
-          <h3>Hedef güç (ERG)</h3>
+          <h3>{t('targetPower')}</h3>
           <p>
             {erg
-              ? `Trainer direnci hedef güce göre ayarlar${range ? ` · desteklenen ${range[0]}–${range[1]} W` : ''}. ${
-                  agent?.target_power_w != null ? `Şu anki hedef ${agent.target_power_w} W.` : 'Hedef ayarlı değil.'
-                }`
-              : 'Trainer bağlı ve hedef gücü destekliyor olduğunda kullanılabilir. Yeniden bağlantıdan sonra hedef otomatik gönderilmez.'}
+              ? t('ergReady', {
+                  range: range ? t('ergRange', { min: range[0], max: range[1] }) : '',
+                  target: agent?.target_power_w != null ? t('currentTarget', { watts: agent.target_power_w }) : t('noTarget'),
+                })
+              : t('ergUnavailableHint')}
           </p>
           {targetError && <p className="access-error">{targetError}</p>}
         </div>
         <form onSubmit={applyTarget} noValidate>
           <label htmlFor="target">
-            Hedef <span>(W)</span>
+            {t('target')} <span>(W)</span>
           </label>
           <input
             id="target"
@@ -143,7 +161,7 @@ export function TrainerPanel({ client, agent, sessionActive, onUnauthorized }: P
             onChange={(event) => setTarget(event.target.value)}
           />
           <button type="submit" disabled={!erg || busy}>
-            Uygula
+            {t('apply')}
           </button>
           <button
             type="button"
@@ -151,12 +169,12 @@ export function TrainerPanel({ client, agent, sessionActive, onUnauthorized }: P
             disabled={!erg || busy || agent?.target_power_w == null}
             onClick={() => void submit('release_control')}
           >
-            Direnci bırak
+            {t('releaseControl')}
           </button>
         </form>
       </div>
       <p className="command-status" role="status">
-        {describeCommand(state)}
+        {describeCommand(state, t)}
       </p>
     </section>
   );

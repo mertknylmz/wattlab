@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(config.address).await?;
     tracing::info!(address = %listener.local_addr()?, "WattLab API listening");
     let app = build_app(
-        config.api_token,
+        config.agent_token,
         Arc::new(PgSessionRepository::new(pool.clone())),
     );
     let streams = app.shutdown.clone();

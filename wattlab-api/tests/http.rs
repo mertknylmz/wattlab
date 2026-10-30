@@ -224,13 +224,9 @@ async fn storage_failure_is_sanitized_and_retryable() {
     let response = app()
         .oneshot(
             Request::builder()
-                .method("POST")
-                .uri("/api/v1/sessions")
+                .uri(format!("/api/v1/sessions/{}", uuid::Uuid::new_v4()))
                 .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_vec(&json!({"request_id":uuid::Uuid::new_v4()})).unwrap(),
-                ))
+                .body(Body::empty())
                 .unwrap(),
         )
         .await

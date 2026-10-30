@@ -1,4 +1,5 @@
 use super::{
+    auth::MemberId,
     dto::{AgentResponse, LiveResponse},
     shutdown::Shutdown,
 };
@@ -27,11 +28,12 @@ struct StreamSnapshot {
 /// Server-sent live view, one snapshot per second. Each event is a fresh read;
 /// the stream never repeats an old snapshot to fill a gap.
 pub(super) async fn live(
+    MemberId(member): MemberId,
     State(sessions): State<SessionService>,
     State(commands): State<CommandService>,
     State(shutdown): State<Shutdown>,
 ) -> impl IntoResponse {
-    let events = snapshots(sessions, commands, shutdown);
+    let events = snapshots(member, sessions, commands, shutdown);
     (
         [(CACHE_CONTROL, "no-store")],
         Sse::new(events).keep_alive(KeepAlive::default()),
@@ -39,6 +41,7 @@ pub(super) async fn live(
 }
 
 fn snapshots(
+    member: uuid::Uuid,
     sessions: SessionService,
     commands: CommandService,
     shutdown: Shutdown,
@@ -52,7 +55,7 @@ fn snapshots(
                     () = shutdown.wait() => return None,
                 }
             }
-            let event = match sessions.live().await {
+            let event = match sessions.live(member).await {
                 Ok(live) => Event::default()
                     .event("snapshot")
                     .json_data(StreamSnapshot {

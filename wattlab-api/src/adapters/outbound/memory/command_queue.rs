@@ -52,8 +52,8 @@ impl InMemoryCommandQueue {
 }
 
 impl CommandQueue for InMemoryCommandQueue {
-    fn submit(&self, kind: CommandKind) -> Command {
-        let command = Command::new(kind, Utc::now());
+    fn submit(&self, kind: CommandKind, issued_by: Uuid) -> Command {
+        let command = Command::new(kind, issued_by, Utc::now());
         {
             let mut state = self.state();
             if state.commands.len() >= RETAINED_COMMANDS {
@@ -138,7 +138,7 @@ mod tests {
             async move { queue.next(Duration::from_secs(5)).await }
         });
         tokio::task::yield_now().await;
-        let submitted = queue.submit(CommandKind::Connect);
+        let submitted = queue.submit(CommandKind::Connect, Uuid::nil());
         let delivered = waiter.await.unwrap().unwrap();
         assert_eq!(delivered.id(), submitted.id());
         assert_eq!(delivered.status(), CommandStatus::Delivered);
@@ -148,7 +148,7 @@ mod tests {
     #[tokio::test]
     async fn results_are_recorded_and_unknown_commands_are_reported() {
         let queue = InMemoryCommandQueue::new();
-        let command = queue.submit(CommandKind::StartSession);
+        let command = queue.submit(CommandKind::StartSession, Uuid::nil());
         assert_eq!(
             queue.complete(command.id(), true, None),
             Err(CompleteError::Conflict)

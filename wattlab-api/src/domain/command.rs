@@ -50,6 +50,8 @@ const MAX_MESSAGE_CHARS: usize = 200;
 pub struct Command {
     id: Uuid,
     kind: CommandKind,
+    /// Member who asked; a session started by this command belongs to them.
+    issued_by: Uuid,
     status: CommandStatus,
     created_at: DateTime<Utc>,
     delivered_at: Option<DateTime<Utc>>,
@@ -68,10 +70,11 @@ impl CommandKind {
 }
 
 impl Command {
-    pub fn new(kind: CommandKind, now: DateTime<Utc>) -> Self {
+    pub fn new(kind: CommandKind, issued_by: Uuid, now: DateTime<Utc>) -> Self {
         Self {
             id: Uuid::new_v4(),
             kind,
+            issued_by,
             status: CommandStatus::Pending,
             created_at: now,
             delivered_at: None,
@@ -133,6 +136,9 @@ impl Command {
     pub fn id(&self) -> Uuid {
         self.id
     }
+    pub fn issued_by(&self) -> Uuid {
+        self.issued_by
+    }
     pub fn kind(&self) -> CommandKind {
         self.kind
     }
@@ -182,7 +188,7 @@ mod tests {
 
     #[test]
     fn commands_are_delivered_once_and_results_are_idempotent() {
-        let mut command = Command::new(CommandKind::Connect, now());
+        let mut command = Command::new(CommandKind::Connect, Uuid::nil(), now());
         assert!(command.deliver(now()));
         assert!(!command.deliver(now()));
         command.complete(true, None, now()).unwrap();
@@ -196,11 +202,11 @@ mod tests {
 
     #[test]
     fn stale_commands_expire_instead_of_reaching_the_trainer_late() {
-        let mut pending = Command::new(CommandKind::StartSession, now());
+        let mut pending = Command::new(CommandKind::StartSession, Uuid::nil(), now());
         assert!(!pending.deliver(now() + DELIVERY_TIMEOUT));
         assert_eq!(pending.status(), CommandStatus::Expired);
 
-        let mut delivered = Command::new(CommandKind::FinishSession, now());
+        let mut delivered = Command::new(CommandKind::FinishSession, Uuid::nil(), now());
         assert!(delivered.deliver(now()));
         assert_eq!(
             delivered.complete(true, None, now() + RESULT_TIMEOUT),
@@ -211,7 +217,7 @@ mod tests {
 
     #[test]
     fn undelivered_commands_cannot_be_completed() {
-        let mut command = Command::new(CommandKind::Disconnect, now());
+        let mut command = Command::new(CommandKind::Disconnect, Uuid::nil(), now());
         assert_eq!(
             command.complete(true, None, now()),
             Err(CommandError::Conflict)
@@ -226,7 +232,7 @@ mod tests {
             CommandKind::set_target_power(250),
             Ok(CommandKind::SetTargetPower { watts: 250 })
         );
-        let mut command = Command::new(CommandKind::ReleaseControl, now());
+        let mut command = Command::new(CommandKind::ReleaseControl, Uuid::nil(), now());
         command.deliver(now());
         command
             .complete(false, Some("é".repeat(500)), now())

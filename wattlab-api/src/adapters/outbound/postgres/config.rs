@@ -2,6 +2,9 @@ use crate::config::{ConfigError, environment_file, setting};
 use sqlx::{ConnectOptions, postgres::PgConnectOptions};
 use std::{fmt, str::FromStr};
 
+/// Every WattLab table, including the migration history, lives in this schema.
+pub(crate) const SCHEMA: &str = "member";
+
 #[derive(Clone)]
 pub struct DatabaseConfig {
     options: PgConnectOptions,
@@ -27,7 +30,7 @@ impl DatabaseConfig {
         if !self
             .options
             .get_database()
-            .is_some_and(|name| name.ends_with("_rust_test"))
+            .is_some_and(|name| name.ends_with("memberdb_test"))
         {
             return Err(ConfigError::UnsafeTestDatabase);
         }
@@ -59,6 +62,7 @@ impl DatabaseConfig {
             .map_err(|_| ConfigError::InvalidDatabase)?
             .username(user)
             .password(password)
+            .options([("search_path", SCHEMA)])
             .disable_statement_logging();
         Ok(Self { options })
     }
@@ -83,7 +87,7 @@ mod tests {
             Err(ConfigError::InvalidDatabase)
         ));
         let config = DatabaseConfig::new(
-            "postgresql://localhost/wattlab_rust_dev",
+            "postgresql://localhost/memberdb",
             "user",
             "example-password",
         )
@@ -93,7 +97,12 @@ mod tests {
 
     #[test]
     fn integration_guard_rejects_dev_and_legacy_test_databases() {
-        for name in ["wattlab_rust_dev", "wattlab_api_test", "production"] {
+        for name in [
+            "memberdb",
+            "wattlab_rust_test",
+            "wattlab_api_test",
+            "production",
+        ] {
             let config = DatabaseConfig::new(
                 &format!("postgresql://localhost/{name}"),
                 "user",
@@ -106,7 +115,7 @@ mod tests {
             ));
         }
         let config = DatabaseConfig::new(
-            "postgresql://localhost/wattlab_rust_test",
+            "postgresql://localhost/memberdb_test",
             "user",
             "example-password",
         )
