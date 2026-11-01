@@ -32,6 +32,10 @@ kullanıcıya özel token alsın. Paylaşılan API anahtarıyla uğraşılmasın
   Başarılı hatırlamasız giriş/kayıt önceki kullanıcı adı tercihini siler;
   başarısız giriş tercihi değiştirmez. Depolama kullanılamıyorsa giriş
   engellenmez. Mevcut oturum geri yükleme ve çıkış API sözleşmesi değişmez.
+  Girişte yerel hesap açıklaması gösterilmez. Hesap değiştirme eylemi giriş
+  düğmesinin altında vurgulu metindir. Hesap/kayıt yönlendirmelerinde soru
+  normal metindir; yalnız Kayıt ol / Create one veya Giriş yap / Sign in
+  eylemi tıklanabilir.
 - Mevcut oturum/FTP verisi taşınmaz; eski `wattlab_rust_dev` dokunulmadan kalır
   (silmek ayrıca kullanıcı onayı ister).
 

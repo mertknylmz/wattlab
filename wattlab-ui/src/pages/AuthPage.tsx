@@ -56,7 +56,7 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
         <h1 className={passwordOnly ? 'auth-greeting' : undefined}>
           {passwordOnly ? t('welcomeBack', { username: rememberedUsername }) : mode === 'login' ? t('login') : t('register')}
         </h1>
-        <p className="subtitle">{t('authSubtitle')}</p>
+        {mode === 'register' ? <p className="subtitle">{t('authSubtitle')}</p> : null}
         <form className="auth-form" onSubmit={(event) => void submit(event)}>
           {!passwordOnly ? (
             <label>
@@ -72,22 +72,6 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
                 maxLength={32}
               />
             </label>
-          ) : null}
-          {passwordOnly ? (
-            <button
-              type="button"
-              className="text-button switch-account"
-              onClick={() => {
-                writeRememberedUsername(null);
-                setRememberedUsername(null);
-                setUsername('');
-                setPassword('');
-                setRepeat('');
-                setError(null);
-              }}
-            >
-              {t('useDifferentAccount')}
-            </button>
           ) : null}
           <label>
             {t('password')}
@@ -138,19 +122,38 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
             {mode === 'login' ? t('login') : t('register')}
           </button>
         </form>
-        <button
-          type="button"
-          className="text-button"
-          onClick={() => {
-            setMode(mode === 'login' ? 'register' : 'login');
-            setUsername(mode === 'login' ? '' : rememberedUsername ?? '');
-            setPassword('');
-            setRepeat('');
-            setError(null);
-          }}
-        >
-          {mode === 'login' ? t('goRegister') : t('goLogin')}
-        </button>
+        {passwordOnly ? (
+          <button
+            type="button"
+            className="text-button auth-link switch-account"
+            onClick={() => {
+              writeRememberedUsername(null);
+              setRememberedUsername(null);
+              setUsername('');
+              setPassword('');
+              setRepeat('');
+              setError(null);
+            }}
+          >
+            {t('useDifferentAccount')}
+          </button>
+        ) : null}
+        <p className="auth-navigation">
+          <span>{mode === 'login' ? t('noAccount') : t('haveAccount')}</span>{' '}
+          <button
+            type="button"
+            className="text-button auth-link"
+            onClick={() => {
+              setMode(mode === 'login' ? 'register' : 'login');
+              setUsername(mode === 'login' ? '' : rememberedUsername ?? '');
+              setPassword('');
+              setRepeat('');
+              setError(null);
+            }}
+          >
+            {mode === 'login' ? t('createOne') : t('login')}
+          </button>
+        </p>
         <AppearanceBar />
       </div>
     </div>

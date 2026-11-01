@@ -161,7 +161,7 @@ describe('App', () => {
       return new Promise(() => {});
     });
     renderWelcome();
-    fireEvent.click(await screen.findByRole('button', { name: /No account/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Create one' }));
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'holy' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse' } });
     fireEvent.change(screen.getByLabelText('Repeat password'), { target: { value: 'correct horse' } });

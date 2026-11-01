@@ -144,14 +144,40 @@ describe('remembered username', () => {
     localStorage.setItem(KEY, 'rider');
     form(vi.fn());
     fireEvent.change(input('Password'), { target: { value: 'unsent password' } });
-    fireEvent.click(screen.getByRole('button', { name: /No account/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create one' }));
     expect(input('Username').value).toBe('');
     expect(input('Password').value).toBe('');
     expect(input('Repeat password').value).toBe('');
-    fireEvent.click(screen.getByRole('button', { name: /Already have/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(screen.getByRole('heading', { name: 'Welcome back, rider' })).toBeTruthy();
     expect(screen.queryByLabelText('Username')).toBeNull();
     expect(input('Password').value).toBe('');
+  });
+
+  it('keeps login copy minimal and places only highlighted navigation actions below Sign in', () => {
+    localStorage.setItem(KEY, 'rider');
+    const fetcher = vi.fn();
+    form(fetcher);
+    expect(screen.queryByText(/Your account stays on this computer/)).toBeNull();
+    const signIn = screen.getByRole('button', { name: 'Sign in' });
+    const switchAccount = screen.getByRole('button', { name: 'Use a different account' });
+    expect(signIn.compareDocumentPosition(switchAccount) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(switchAccount.classList.contains('auth-link')).toBe(true);
+    const prompt = screen.getByText('No account?');
+    expect(prompt.closest('button, a')).toBeNull();
+    const create = screen.getByRole('button', { name: 'Create one' });
+    expect(create.classList.contains('auth-link')).toBe(true);
+    fireEvent.click(prompt);
+    expect(screen.queryByLabelText('Username')).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'TR' }));
+    expect(screen.getByText('Hesabın yok mu?').closest('button, a')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Kayıt ol' }));
+    expect(input('Kullanıcı adı').value).toBe('');
+    expect(screen.getByText('Hesabın var mı?').closest('button, a')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Giriş yap' }));
+    expect(screen.getByRole('heading', { name: 'Tekrar hoş geldin, rider' })).toBeTruthy();
+    expect(screen.queryByText(/Hesabın bu bilgisayarda kalır/)).toBeNull();
   });
 
   it('still signs in if preference storage is unavailable', async () => {
