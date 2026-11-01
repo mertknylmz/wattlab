@@ -68,9 +68,10 @@ describe('remembered username', () => {
     await screen.findByRole('link', { name: 'Get started' });
     expect(fetcher.mock.calls.filter(([url]) => url === '/api/v1/auth/login')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
-    await screen.findByRole('heading', { name: 'Sign in' });
+    await screen.findByRole('heading', { name: 'Welcome back, rider' });
     expect(authenticated).toBe(false);
-    expect(input('Username').value).toBe('rider');
+    expect(screen.queryByLabelText('Username')).toBeNull();
+    expect(document.querySelector('input[name=username]')).toBeNull();
     expect(input('Password').value).toBe('');
     expect(document.activeElement).toBe(input('Password'));
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
@@ -79,9 +80,20 @@ describe('remembered username', () => {
     // Restart after explicit logout must not restore authentication.
     view.unmount();
     mount();
-    await screen.findByRole('heading', { name: 'Sign in' });
-    expect(input('Username').value).toBe('rider');
+    await screen.findByRole('heading', { name: 'Welcome back, rider' });
+    expect(screen.queryByLabelText('Username')).toBeNull();
     expect(input('Password').value).toBe('');
+    fireEvent.change(input('Password'), { target: { value: 'correct horse' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByRole('link', { name: 'Get started' });
+    const logins = fetcher.mock.calls.filter(([url]) => url === '/api/v1/auth/login');
+    expect(JSON.parse(String(logins[1][1]?.body))).toEqual({ username: 'rider', password: 'correct horse' });
+    fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
+    await screen.findByRole('heading', { name: 'Welcome back, rider' });
+    fireEvent.click(screen.getByRole('button', { name: 'Use a different account' }));
+    expect(input('Username').value).toBe('');
+    expect(input('Password').value).toBe('');
+    expect(localStorage.getItem(KEY)).toBeNull();
     credentials('another');
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await screen.findByRole('link', { name: 'Get started' });
@@ -92,7 +104,8 @@ describe('remembered username', () => {
     localStorage.setItem(KEY, 'previous');
     const fetcher = vi.fn((_url: string, _options?: RequestInit) => json({ member: MEMBER }));
     const signedIn = form(fetcher, available);
-    credentials();
+    expect(screen.queryByLabelText('Username')).toBeNull();
+    fireEvent.change(input('Password'), { target: { value: 'correct horse' } });
     if (available) fireEvent.click(input('Remember me'));
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await waitFor(() => expect(signedIn).toHaveBeenCalledWith(MEMBER));
@@ -103,7 +116,7 @@ describe('remembered username', () => {
   it('keeps the previous preference after a rejected login', async () => {
     localStorage.setItem(KEY, 'previous');
     const signedIn = form(vi.fn(() => json({}, 401)));
-    credentials('another');
+    fireEvent.change(input('Password'), { target: { value: 'wrong password' } });
     fireEvent.click(input('Remember me'));
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await screen.findByRole('alert');
@@ -111,13 +124,15 @@ describe('remembered username', () => {
     expect(localStorage.getItem(KEY)).toBe('previous');
   });
 
-  it('can forget a username immediately with localized controls', () => {
+  it('switches to another account with localized controls and clears unsent credentials', () => {
     localStorage.setItem(KEY, 'rider');
     const fetcher = vi.fn();
     form(fetcher);
     fireEvent.change(input('Password'), { target: { value: 'unsent password' } });
     fireEvent.click(screen.getByRole('button', { name: 'TR' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Kullanıcı adını unut' }));
+    expect(screen.getByRole('heading', { name: 'Tekrar hoş geldin, rider' })).toBeTruthy();
+    expect(screen.queryByLabelText('Kullanıcı adı')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Başka bir hesapla giriş yap' }));
     expect(localStorage.getItem(KEY)).toBeNull();
     expect(input('Kullanıcı adı').value).toBe('');
     expect(input('Şifre').value).toBe('');
@@ -134,7 +149,8 @@ describe('remembered username', () => {
     expect(input('Password').value).toBe('');
     expect(input('Repeat password').value).toBe('');
     fireEvent.click(screen.getByRole('button', { name: /Already have/ }));
-    expect(input('Username').value).toBe('rider');
+    expect(screen.getByRole('heading', { name: 'Welcome back, rider' })).toBeTruthy();
+    expect(screen.queryByLabelText('Username')).toBeNull();
     expect(input('Password').value).toBe('');
   });
 

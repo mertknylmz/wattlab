@@ -23,10 +23,12 @@ kullanıcıya özel token alsın. Paylaşılan API anahtarıyla uğraşılmasın
 - Issue #5 (2 Kasım 2026): başarılı, "Beni hatırla" seçili giriş/kayıt sonrası
   yalnızca API'nin döndürdüğü kullanıcı adı `localStorage` içindeki
   `wattlab.rememberedUsername` tercihinde tutulur. Açık çıkış mevcut oturumu
-  yine sonlandırır; giriş formu kullanıcı adını düzenlenebilir doldurur,
-  şifre boş kalır ve odağı alır. Bu tercih kimlik doğrulama sağlamaz;
+  yine sonlandırır; giriş formu gerçek hatırlanan adla kişisel karşılama
+  gösterir ve kullanıcı adı alanı içermez. Yalnızca şifre alanı görünür,
+  boş kalır ve odağı alır. Giriş isteği hatırlanan kullanıcı adını kullanır. Bu tercih kimlik doğrulama sağlamaz;
   token Electron/safeStorage içinde kalır, şifre kalıcı yazılmaz.
-  "Kullanıcı adını unut / Forget username" tercihi ve formu temizler.
+  "Başka bir hesapla giriş yap / Use a different account" tercihi ve formu
+  temizleyip normal kullanıcı adı + şifre girişine geçer.
   Başarılı hatırlamasız giriş/kayıt önceki kullanıcı adı tercihini siler;
   başarısız giriş tercihi değiştirmez. Depolama kullanılamıyorsa giriş
   engellenmez. Mevcut oturum geri yükleme ve çıkış API sözleşmesi değişmez.

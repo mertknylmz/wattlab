@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { ApiClient, ApiError, UnauthorizedError } from '../api/client';
 import type { Member } from '../api/types';
 import { AppearanceBar } from '../components/AppearanceBar';
@@ -17,7 +17,7 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [rememberedUsername, setRememberedUsername] = useState(readRememberedUsername);
   const [username, setUsername] = useState(rememberedUsername ?? '');
-  const usernameInput = useRef<HTMLInputElement>(null);
+  const passwordOnly = mode === 'login' && rememberedUsername !== null;
   const [password, setPassword] = useState('');
   const [repeat, setRepeat] = useState('');
   const [remember, setRemember] = useState<boolean | null>(null);
@@ -37,7 +37,7 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
       const session =
         mode === 'register'
           ? await client.register(username, password, keep)
-          : await client.login(username, password, keep);
+          : await client.login(passwordOnly ? rememberedUsername : username, password, keep);
       writeRememberedUsername(keep ? session.member.username : null);
       onSignedIn(session.member);
     } catch (cause) {
@@ -53,27 +53,30 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
     <div className="auth-page">
       <div className="list-card auth-card">
         <p className="eyebrow">WATTLAB</p>
-        <h1>{mode === 'login' ? t('login') : t('register')}</h1>
+        <h1 className={passwordOnly ? 'auth-greeting' : undefined}>
+          {passwordOnly ? t('welcomeBack', { username: rememberedUsername }) : mode === 'login' ? t('login') : t('register')}
+        </h1>
         <p className="subtitle">{t('authSubtitle')}</p>
         <form className="auth-form" onSubmit={(event) => void submit(event)}>
-          <label>
-            {t('username')}
-            <input
-              ref={usernameInput}
-              name="username"
-              autoComplete="username"
-              autoFocus={!rememberedUsername}
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              required
-              minLength={3}
-              maxLength={32}
-            />
-          </label>
-          {mode === 'login' && rememberedUsername ? (
+          {!passwordOnly ? (
+            <label>
+              {t('username')}
+              <input
+                name="username"
+                autoComplete="username"
+                autoFocus
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                required
+                minLength={3}
+                maxLength={32}
+              />
+            </label>
+          ) : null}
+          {passwordOnly ? (
             <button
               type="button"
-              className="text-button forget-username"
+              className="text-button switch-account"
               onClick={() => {
                 writeRememberedUsername(null);
                 setRememberedUsername(null);
@@ -81,16 +84,15 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
                 setPassword('');
                 setRepeat('');
                 setError(null);
-                usernameInput.current?.focus();
               }}
             >
-              {t('forgetUsername')}
+              {t('useDifferentAccount')}
             </button>
           ) : null}
           <label>
             {t('password')}
             <input
-              autoFocus={Boolean(rememberedUsername)}
+              autoFocus={passwordOnly}
               name="password"
               type="password"
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
