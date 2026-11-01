@@ -4,6 +4,7 @@ import type { Member } from '../api/types';
 import { AppearanceBar } from '../components/AppearanceBar';
 import { useAppearance } from '../i18n/appearance';
 import { AUTH_ERRORS } from '../i18n/messages';
+import { readRememberedUsername, writeRememberedUsername } from '../model/authPrefs';
 
 interface Props {
   client: ApiClient;
@@ -14,10 +15,13 @@ interface Props {
 export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
   const { t } = useAppearance();
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [username, setUsername] = useState('');
+  const [rememberedUsername, setRememberedUsername] = useState(readRememberedUsername);
+  const [username, setUsername] = useState(rememberedUsername ?? '');
+  const passwordOnly = mode === 'login' && rememberedUsername !== null;
   const [password, setPassword] = useState('');
   const [repeat, setRepeat] = useState('');
-  const [remember, setRemember] = useState(rememberAvailable);
+  const [remember, setRemember] = useState<boolean | null>(null);
+  const keep = rememberAvailable && (remember ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,11 +34,11 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const keep = rememberAvailable && remember;
       const session =
         mode === 'register'
           ? await client.register(username, password, keep)
-          : await client.login(username, password, keep);
+          : await client.login(passwordOnly ? rememberedUsername : username, password, keep);
+      writeRememberedUsername(keep ? session.member.username : null);
       onSignedIn(session.member);
     } catch (cause) {
       if (cause instanceof UnauthorizedError) setError(t('errInvalidCredentials'));
@@ -49,24 +53,30 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
     <div className="auth-page">
       <div className="list-card auth-card">
         <p className="eyebrow">WATTLAB</p>
-        <h1>{mode === 'login' ? t('login') : t('register')}</h1>
-        <p className="subtitle">{t('authSubtitle')}</p>
+        <h1 className={passwordOnly ? 'auth-greeting' : undefined}>
+          {passwordOnly ? t('welcomeBack', { username: rememberedUsername }) : mode === 'login' ? t('login') : t('register')}
+        </h1>
+        {mode === 'register' ? <p className="subtitle">{t('authSubtitle')}</p> : null}
         <form className="auth-form" onSubmit={(event) => void submit(event)}>
-          <label>
-            {t('username')}
-            <input
-              name="username"
-              autoComplete="username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              required
-              minLength={3}
-              maxLength={32}
-            />
-          </label>
+          {!passwordOnly ? (
+            <label>
+              {t('username')}
+              <input
+                name="username"
+                autoComplete="username"
+                autoFocus
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                required
+                minLength={3}
+                maxLength={32}
+              />
+            </label>
+          ) : null}
           <label>
             {t('password')}
             <input
+              autoFocus={passwordOnly}
               name="password"
               type="password"
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
@@ -96,7 +106,7 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
             <input
               id="remember"
               type="checkbox"
-              checked={rememberAvailable && remember}
+              checked={keep}
               disabled={!rememberAvailable}
               onChange={(event) => setRemember(event.target.checked)}
             />
@@ -112,16 +122,38 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
             {mode === 'login' ? t('login') : t('register')}
           </button>
         </form>
-        <button
-          type="button"
-          className="text-button"
-          onClick={() => {
-            setMode(mode === 'login' ? 'register' : 'login');
-            setError(null);
-          }}
-        >
-          {mode === 'login' ? t('goRegister') : t('goLogin')}
-        </button>
+        {passwordOnly ? (
+          <button
+            type="button"
+            className="text-button auth-link switch-account"
+            onClick={() => {
+              writeRememberedUsername(null);
+              setRememberedUsername(null);
+              setUsername('');
+              setPassword('');
+              setRepeat('');
+              setError(null);
+            }}
+          >
+            {t('useDifferentAccount')}
+          </button>
+        ) : null}
+        <p className="auth-navigation">
+          <span>{mode === 'login' ? t('noAccount') : t('haveAccount')}</span>{' '}
+          <button
+            type="button"
+            className="text-button auth-link"
+            onClick={() => {
+              setMode(mode === 'login' ? 'register' : 'login');
+              setUsername(mode === 'login' ? '' : rememberedUsername ?? '');
+              setPassword('');
+              setRepeat('');
+              setError(null);
+            }}
+          >
+            {mode === 'login' ? t('createOne') : t('login')}
+          </button>
+        </p>
         <AppearanceBar />
       </div>
     </div>
