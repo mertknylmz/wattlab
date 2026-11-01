@@ -7,12 +7,21 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandKind {
     Scan,
-    Connect { address: String },
+    Connect {
+        address: String,
+    },
     Disconnect,
     StartSession,
     FinishSession,
-    SetTargetPower { watts: i32 },
+    SetTargetPower {
+        watts: i32,
+    },
     ReleaseControl,
+    /// Find Zwift Click / Play remotes. Allowed while a trainer is connected.
+    ScanControllers,
+    /// Connect the scanned remotes (at most a Play left/right pair). No address.
+    ConnectController,
+    DisconnectController,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +203,29 @@ pub struct NearbyDevice {
     pub rssi: Option<i16>,
 }
 
+/// A Click or Play seen while scanning. `selected` is one of the remotes the
+/// next addressless connect will take (at most two, preferring a Play pair).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControllerDevice {
+    pub address: String,
+    pub name: Option<String>,
+    pub rssi: Option<i16>,
+    pub kind: String,
+    pub side: Option<String>,
+    pub selected: bool,
+}
+
+/// Last reported link for one remote. Rust does not open Bluetooth.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControllerLink {
+    pub address: String,
+    pub name: Option<String>,
+    pub kind: String,
+    pub side: Option<String>,
+    pub state: String,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentStatus {
     pub agent_id: Uuid,
@@ -204,6 +236,8 @@ pub struct AgentStatus {
     pub target_power_w: Option<i32>,
     pub trainer_address: Option<String>,
     pub devices: Vec<NearbyDevice>,
+    pub controller_devices: Vec<ControllerDevice>,
+    pub controllers: Vec<ControllerLink>,
     pub received_at: DateTime<Utc>,
 }
 
@@ -301,6 +335,8 @@ mod tests {
             target_power_w: None,
             trainer_address: None,
             devices: Vec::new(),
+            controller_devices: Vec::new(),
+            controllers: Vec::new(),
             received_at: now(),
         };
         assert!(status.online(now() + AGENT_ONLINE_WINDOW));

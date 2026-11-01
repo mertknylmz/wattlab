@@ -6,6 +6,7 @@ import { useAgentStatus } from '../hooks/useAgentStatus';
 import { useCommand } from '../hooks/useCommand';
 import { useAppearance } from '../i18n/appearance';
 import { formatDate } from '../model/format';
+import { controllerLabel, controllerStatus } from '../model/controllers';
 import { readLastTrainer, trainerLabel, writeTrainerAddress } from '../model/trainerPrefs';
 import { isValidFtp } from '../model/zones';
 import { describeCommand, trainerConnectionLabel } from './TrainerPanel';
@@ -39,6 +40,19 @@ export function SettingsPage({ client, tab, settings, onSaved, onUnauthorized }:
   const canScan = Boolean(agent?.online) && !streaming && !locked;
   const canDisconnect = streaming && !locked;
   const devices = agent?.devices ?? [];
+  const controllerDevices = agent?.controller_devices ?? [];
+  const controllerLinks = agent?.controllers ?? [];
+  const canUseControllers = Boolean(agent?.online) && !busy;
+  const selectedControllers = controllerDevices.filter((device) => device.selected);
+  const pairConnected =
+    selectedControllers.length > 0 &&
+    selectedControllers.every((device) =>
+      controllerLinks.some((link) => link.address === device.address && link.state === 'connected'),
+    );
+  const controllerOpening = controllerLinks.some((link) => link.state === 'connecting');
+  const controllerHeld = controllerLinks.some((link) => link.state === 'connecting' || link.state === 'connected');
+  const canConnectControllers = canUseControllers && controllerDevices.length > 0 && !pairConnected && !controllerOpening;
+  const canDisconnectControllers = Boolean(agent?.online) && !busy && controllerHeld;
   const erg = streaming && agent?.erg_supported;
   const range = agent?.power_range_w;
   const [target, setTarget] = useState('');
@@ -221,7 +235,51 @@ export function SettingsPage({ client, tab, settings, onSaved, onUnauthorized }:
             ) : (
               <p className="hint">{t('noDevices')}</p>
             )}
-            <p className="hint">{t('controllersLater')}</p>
+          </section>
+          <section className="list-card settings">
+            <h2>{t('controllersTitle')}</h2>
+            <p data-testid="controller-status" className={controllerLinks.some((link) => link.state === 'failed') ? 'access-error' : undefined}>
+              {controllerStatus(controllerLinks, controllerDevices, t)}
+            </p>
+            <div className="panel-actions device-actions">
+              <button
+                type="button"
+                className="secondary"
+                disabled={!canUseControllers}
+                aria-busy={busy && state?.kind === 'scan_controllers'}
+                onClick={() => void sendCommand('scan_controllers').then(() => refresh())}
+              >
+                {busy && state?.kind === 'scan_controllers' ? t('scanning') : t('scanControllers')}
+              </button>
+              <button type="button" disabled={!canConnectControllers} onClick={() => void sendCommand('connect_controller').then(() => refresh())}>
+                {t('connectControllers')}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={!canDisconnectControllers}
+                onClick={() => void sendCommand('disconnect_controller').then(() => refresh())}
+              >
+                {t('disconnectControllers')}
+              </button>
+            </div>
+            {controllerDevices.length ? (
+              <ul className="controller-list" aria-label={t('controllerList')}>
+                {controllerDevices.map((device) => (
+                  <li key={device.address} className={device.selected ? 'will-connect' : undefined}>
+                    <strong>{controllerLabel(device, t)}</strong>
+                    <span>
+                      {device.address}
+                      {device.rssi != null ? ` · ${device.rssi} dBm` : ''}
+                      {device.selected ? ` · ${t('controllerWillConnect')}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="hint">{t('controllerNone')}</p>
+            )}
+            <p className="hint">{t('controllerHint')}</p>
           </section>
           <section className="list-card settings">
             <h2>{t('targetPower')}</h2>
