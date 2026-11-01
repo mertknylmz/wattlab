@@ -9,6 +9,16 @@ sürecinde Bearer eklenerek iletilir — bkz. `wattlab-desktop/src/renderer-prot
 Masaüstü uygulaması açılınca login/register ekranı gelsin; kullanıcı giriş yapıp
 kullanıcıya özel token alsın. Paylaşılan API anahtarıyla uğraşılmasın.
 
+Güncel açılış akışı (issue #11, 2 Kasım 2026): doğrulanmış oturum yoksa
+önce masaüstü içinde basit bir başlangıç sayfası, ardından Giriş yap / Log in
+ve Kayıt ol / Register seçenekleri gösterilir. Giriş seçilince mevcut
+hatırlanan hesap/parola formu; kayıt seçilince boş kayıt formu açılır.
+Formlardaki Başlangıca dön / Back to start parola alanlarını unutarak bu
+sayfaya döner. Açık çıkış mevcut parola giriş ekranına döner. Geri yüklenen
+doğrulanmış oturum ve başarılı giriş/kayıt doğrudan mevcut Welcome'a gider;
+Get started → Live değişmez. Başlangıç ve formlar TR/EN ve tema tercihini
+paylaşır; oturum yokken trainer komutu veya ajan sorgusu başlatılmaz.
+
 ## Kesin kararlar (kullanıcı)
 
 - Hesaplar yerel PostgreSQL'de (internetsiz çalışma kuralı korunur).

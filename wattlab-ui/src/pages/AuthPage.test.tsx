@@ -54,6 +54,7 @@ describe('remembered username', () => {
     });
     const mount = () => render(<App client={new ApiClient(fetcher as unknown as typeof fetch)} />);
     let view = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Log in' }));
     await screen.findByRole('heading', { name: 'Sign in' });
     await waitFor(() => expect(input('Remember me').disabled).toBe(false));
     credentials('Rider');
@@ -80,6 +81,7 @@ describe('remembered username', () => {
     // Restart after explicit logout must not restore authentication.
     view.unmount();
     mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Log in' }));
     await screen.findByRole('heading', { name: 'Welcome back, rider' });
     expect(screen.queryByLabelText('Username')).toBeNull();
     expect(input('Password').value).toBe('');

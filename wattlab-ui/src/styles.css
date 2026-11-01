@@ -31,3 +31,6 @@ html{color-scheme:dark}:root,:root[data-theme=dark]{color-scheme:dark;--bg:#1014
 .auth-card .auth-link{color:var(--accent);padding:0;font-size:inherit}.auth-card .auth-link:hover{text-decoration:underline}.auth-card .switch-account{font-size:11px;margin:8px 0}.auth-card .auth-navigation{font-size:11px;color:var(--muted);margin:12px 0}
 
 .auth-card .auth-greeting{font-size:32px;line-height:1.2;overflow-wrap:anywhere}
+
+.landing-card{width:100%;max-width:580px;padding:40px;margin:0}.landing-brand{margin:0 0 48px}.landing-card h1{font-size:44px;line-height:1.1;margin:16px 0 20px}.landing-intro{font-size:14px;line-height:1.8;color:var(--muted);max-width:430px}.landing-actions{display:flex;gap:12px;flex-wrap:wrap;margin:30px 0}.landing-actions button{padding:12px 24px;font-size:12px}.landing-primary{border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:var(--accent-ink);font-weight:650}.auth-back{margin-bottom:22px;padding:0;color:var(--accent)}.landing-card .appearance-bar{padding-top:18px;border-top:1px solid var(--card-border)}
+@media(max-width:600px){.landing-card{padding:28px}.landing-card h1{font-size:36px}.landing-brand{margin-bottom:32px}}
