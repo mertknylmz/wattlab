@@ -87,6 +87,7 @@ describe('App', () => {
       return new Promise(() => {});
     });
     renderWelcome();
+    fireEvent.click(await screen.findByRole('button', { name: 'Log in' }));
     await screen.findByRole('heading', { name: 'Sign in' });
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'holy' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse' } });
@@ -137,13 +138,16 @@ describe('App', () => {
     expect(screen.queryByLabelText('Password')).toBeNull();
   });
 
-  it('asks for login when the desktop shell has no member session', async () => {
+  it('shows the landing page when the desktop shell has no member session', async () => {
     fetcher.mockImplementation((url: string) => {
       if (url === '/api/v1/desktop/capabilities') return json({ remember_available: false });
       if (url === '/api/v1/auth/me') return json({}, 401);
       return json({});
     });
     renderWelcome();
+    expect(await screen.findByRole('heading', { name: 'Your next ride starts here.' })).toBeTruthy();
+    expect(screen.queryByLabelText('Password')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeTruthy();
     expect(screen.getByText(/no encrypted storage/)).toBeTruthy();
   });
@@ -161,7 +165,7 @@ describe('App', () => {
       return new Promise(() => {});
     });
     renderWelcome();
-    fireEvent.click(await screen.findByRole('button', { name: 'Create one' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Register' }));
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'holy' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse' } });
     fireEvent.change(screen.getByLabelText('Repeat password'), { target: { value: 'correct horse' } });

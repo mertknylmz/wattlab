@@ -7,16 +7,18 @@ import { AUTH_ERRORS } from '../i18n/messages';
 import { readRememberedUsername, writeRememberedUsername } from '../model/authPrefs';
 
 interface Props {
+  initialMode?: 'login' | 'register';
+  onBack?(): void;
   client: ApiClient;
   rememberAvailable: boolean;
   onSignedIn(member: Member): void;
 }
 
-export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
+export function AuthPage({ client, rememberAvailable, onSignedIn, initialMode = 'login', onBack }: Props) {
   const { t } = useAppearance();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [rememberedUsername, setRememberedUsername] = useState(readRememberedUsername);
-  const [username, setUsername] = useState(rememberedUsername ?? '');
+  const [username, setUsername] = useState(initialMode === 'login' ? rememberedUsername ?? '' : '');
   const passwordOnly = mode === 'login' && rememberedUsername !== null;
   const [password, setPassword] = useState('');
   const [repeat, setRepeat] = useState('');
@@ -52,6 +54,11 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
   return (
     <div className="auth-page">
       <div className="list-card auth-card">
+        {onBack ? (
+          <button type="button" className="text-button auth-back" onClick={onBack}>
+            <span aria-hidden="true">← </span>{t('backToStart')}
+          </button>
+        ) : null}
         <p className="eyebrow">WATTLAB</p>
         <h1 className={passwordOnly ? 'auth-greeting' : undefined}>
           {passwordOnly ? t('welcomeBack', { username: rememberedUsername }) : mode === 'login' ? t('login') : t('register')}

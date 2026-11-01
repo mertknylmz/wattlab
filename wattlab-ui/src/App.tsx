@@ -9,6 +9,7 @@ import { DEFAULT_FTP_W } from './model/zones';
 import { useAgentStatus } from './hooks/useAgentStatus';
 import { useAutoConnect } from './hooks/useAutoConnect';
 import { WelcomePage } from './pages/WelcomePage';
+import { LandingPage } from './pages/LandingPage';
 import { AuthPage } from './pages/AuthPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { LivePage } from './pages/LivePage';
@@ -80,11 +81,15 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
   const { route, welcome } = useRoute();
   const client = useMemo(() => provided ?? new ApiClient(), [provided]);
   const [user, setUser] = useState<Member | null | undefined>(undefined);
+  const [authScreen, setAuthScreen] = useState<'landing' | 'login' | 'register'>('landing');
   const [rememberAvailable, setRememberAvailable] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [online, setOnline] = useState<boolean | null>(null);
   const [logoutError, setLogoutError] = useState<string | null>(null);
-  const signOut = useCallback(() => setUser(null), []);
+  const signOut = useCallback(() => {
+    setAuthScreen('login');
+    setUser(null);
+  }, []);
 
   const signedIn = useCallback((member: Member) => {
     welcome();
@@ -159,7 +164,19 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
     );
   }
   if (user === null) {
-    return <AuthPage client={client} rememberAvailable={rememberAvailable} onSignedIn={signedIn} />;
+    if (authScreen === 'landing') {
+      return <LandingPage onLogin={() => setAuthScreen('login')} onRegister={() => setAuthScreen('register')} />;
+    }
+    return (
+      <AuthPage
+        key={authScreen}
+        initialMode={authScreen}
+        client={client}
+        rememberAvailable={rememberAvailable}
+        onSignedIn={signedIn}
+        onBack={() => setAuthScreen('landing')}
+      />
+    );
   }
 
   const nav = (page: Route['page'], href: string, label: string) => {
