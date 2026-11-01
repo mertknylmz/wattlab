@@ -20,6 +20,16 @@ kullanıcıya özel token alsın. Paylaşılan API anahtarıyla uğraşılmasın
 - Aynı bilgisayarda çok kullanıcı; oturumlar, FTP ve geçmiş kullanıcıya ayrı.
 - Kimlik: kullanıcı adı + şifre (e-posta yok).
 - "Beni hatırla": uygulama yeniden açılınca giriş açık kalır.
+- Issue #5 (2 Kasım 2026): başarılı, "Beni hatırla" seçili giriş/kayıt sonrası
+  yalnızca API'nin döndürdüğü kullanıcı adı `localStorage` içindeki
+  `wattlab.rememberedUsername` tercihinde tutulur. Açık çıkış mevcut oturumu
+  yine sonlandırır; giriş formu kullanıcı adını düzenlenebilir doldurur,
+  şifre boş kalır ve odağı alır. Bu tercih kimlik doğrulama sağlamaz;
+  token Electron/safeStorage içinde kalır, şifre kalıcı yazılmaz.
+  "Kullanıcı adını unut / Forget username" tercihi ve formu temizler.
+  Başarılı hatırlamasız giriş/kayıt önceki kullanıcı adı tercihini siler;
+  başarısız giriş tercihi değiştirmez. Depolama kullanılamıyorsa giriş
+  engellenmez. Mevcut oturum geri yükleme ve çıkış API sözleşmesi değişmez.
 - Mevcut oturum/FTP verisi taşınmaz; eski `wattlab_rust_dev` dokunulmadan kalır
   (silmek ayrıca kullanıcı onayı ister).
 

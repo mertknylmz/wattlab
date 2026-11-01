@@ -27,3 +27,5 @@ html{color-scheme:dark}:root,:root[data-theme=dark]{color-scheme:dark;--bg:#1014
 .welcome-orbit{stroke:var(--card-border);stroke-width:1}
 @media(max-width:1100px){.welcome{padding:32px;gap:20px}}
 @media(max-width:850px){.welcome{grid-template-columns:1fr;min-height:0}.welcome-art{max-width:220px}.welcome h1{font-size:40px}}
+
+.auth-form .forget-username{align-self:flex-start;padding:2px 0 6px;color:var(--muted)}

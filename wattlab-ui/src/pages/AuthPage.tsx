@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ApiClient, ApiError, UnauthorizedError } from '../api/client';
 import type { Member } from '../api/types';
 import { AppearanceBar } from '../components/AppearanceBar';
 import { useAppearance } from '../i18n/appearance';
 import { AUTH_ERRORS } from '../i18n/messages';
+import { readRememberedUsername, writeRememberedUsername } from '../model/authPrefs';
 
 interface Props {
   client: ApiClient;
@@ -14,10 +15,13 @@ interface Props {
 export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
   const { t } = useAppearance();
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [username, setUsername] = useState('');
+  const [rememberedUsername, setRememberedUsername] = useState(readRememberedUsername);
+  const [username, setUsername] = useState(rememberedUsername ?? '');
+  const usernameInput = useRef<HTMLInputElement>(null);
   const [password, setPassword] = useState('');
   const [repeat, setRepeat] = useState('');
-  const [remember, setRemember] = useState(rememberAvailable);
+  const [remember, setRemember] = useState<boolean | null>(null);
+  const keep = rememberAvailable && (remember ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,11 +34,11 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const keep = rememberAvailable && remember;
       const session =
         mode === 'register'
           ? await client.register(username, password, keep)
           : await client.login(username, password, keep);
+      writeRememberedUsername(keep ? session.member.username : null);
       onSignedIn(session.member);
     } catch (cause) {
       if (cause instanceof UnauthorizedError) setError(t('errInvalidCredentials'));
@@ -55,8 +59,10 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
           <label>
             {t('username')}
             <input
+              ref={usernameInput}
               name="username"
               autoComplete="username"
+              autoFocus={!rememberedUsername}
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               required
@@ -64,9 +70,27 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
               maxLength={32}
             />
           </label>
+          {mode === 'login' && rememberedUsername ? (
+            <button
+              type="button"
+              className="text-button forget-username"
+              onClick={() => {
+                writeRememberedUsername(null);
+                setRememberedUsername(null);
+                setUsername('');
+                setPassword('');
+                setRepeat('');
+                setError(null);
+                usernameInput.current?.focus();
+              }}
+            >
+              {t('forgetUsername')}
+            </button>
+          ) : null}
           <label>
             {t('password')}
             <input
+              autoFocus={Boolean(rememberedUsername)}
               name="password"
               type="password"
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
@@ -96,7 +120,7 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
             <input
               id="remember"
               type="checkbox"
-              checked={rememberAvailable && remember}
+              checked={keep}
               disabled={!rememberAvailable}
               onChange={(event) => setRemember(event.target.checked)}
             />
@@ -117,6 +141,9 @@ export function AuthPage({ client, rememberAvailable, onSignedIn }: Props) {
           className="text-button"
           onClick={() => {
             setMode(mode === 'login' ? 'register' : 'login');
+            setUsername(mode === 'login' ? '' : rememberedUsername ?? '');
+            setPassword('');
+            setRepeat('');
             setError(null);
           }}
         >
