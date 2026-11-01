@@ -135,7 +135,7 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
     }
   };
 
-  useAutoConnect(client, user != null, signOut);
+  const { connecting: autoConnecting } = useAutoConnect(client, user != null, signOut);
   const { agent } = useAgentStatus(client, signOut, 1000, user != null);
 
   if (user === undefined) {
@@ -213,11 +213,10 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
           {nav('history', '#/history', t('navHistory'))}
         </nav>
         <div className="rail-bottom">
-          <span className="rail-user">{user.username}</span>
           <nav className="rail-account" aria-label={t('accountNav')}>
             <a className={route.page === 'profile' ? 'active' : undefined} href="#/profile">
               <Icon path="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-3.3 0-8 1.7-8 4v2h16v-2c0-2.3-4.7-4-8-4z" />
-              {t('profile')}
+              {user.username}
             </a>
             <a className={route.page === 'settings' ? 'active' : undefined} href="#/settings">
               <Icon path="M19.1 12.9a7.6 7.6 0 0 0 .1-1.8l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.6-.9L14.6 3h-5.2L8.8 6.2a7.4 7.4 0 0 0-1.6.9l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0-.1 1.8l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.6.9L9.4 21h5.2l.6-3.2a7.4 7.4 0 0 0 1.6-.9l2.4 1 2-3.4zM12 15.5A3.5 3.5 0 1 1 15.5 12 3.5 3.5 0 0 1 12 15.5z" />
@@ -245,7 +244,7 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
             WATTLAB <span>/</span> {t(TITLES[route.page])}
           </div>
           <div className="header-tools">
-            <ConnectionStatus agent={agent} />
+            <ConnectionStatus agent={agent} connecting={autoConnecting} />
             <span className={`badge ${badge[1]}`} data-testid="api-status">
               {badge[0]}
             </span>

@@ -1,5 +1,17 @@
 # WattLab
 
+## Pull request workflow
+
+Create a branch for each change and open a pull request into `main`. Individual
+commit messages are unrestricted. PR titles use `<type>[optional scope][!]: <description>`,
+for example `fix(ui): show trainer connection progress`.
+
+The PR title check accepts `feat`, `fix`, `docs`, `style`, `refactor`, `perf`,
+`test`, `build`, `ci`, `chore`, and `revert`.
+To enforce this on GitHub, protect `main`: require a pull request and the
+`PR title` status check, apply the rule to administrators, and leave bypasses disabled.
+The workflow must be published before GitHub can run or require its check.
+
 Ubuntu + Van Rysel D500 BLE exploration. Bluetooth addresses are local configuration, not committed.
 
 ```bash

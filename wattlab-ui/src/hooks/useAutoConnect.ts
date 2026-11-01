@@ -11,7 +11,7 @@ const IN_PROGRESS = new Set(['connecting', 'subscribing', 'streaming', 'retry_wa
  * does not reconnect until the app is opened again.
  */
 export function useAutoConnect(client: ApiClient, enabled: boolean, onUnauthorized: () => void) {
-  const { submit } = useCommand(client, onUnauthorized);
+  const { submit, busy } = useCommand(client, onUnauthorized);
 
   useEffect(() => {
     if (!enabled) return;
@@ -45,4 +45,6 @@ export function useAutoConnect(client: ApiClient, enabled: boolean, onUnauthoriz
       clearInterval(timer);
     };
   }, [client, enabled, onUnauthorized, submit]);
+
+  return { connecting: enabled && busy };
 }
