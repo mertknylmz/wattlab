@@ -37,7 +37,6 @@ export function SettingsPage({ client, tab, settings, onSaved, onUnauthorized }:
   const inProgress = streaming || linking;
   const locked = linking || busy;
   const canScan = Boolean(agent?.online) && !streaming && !locked;
-  const canConnect = canScan && Boolean(selected);
   const canDisconnect = streaming && !locked;
   const devices = agent?.devices ?? [];
   const erg = streaming && agent?.erg_supported;
@@ -52,13 +51,15 @@ export function SettingsPage({ client, tab, settings, onSaved, onUnauthorized }:
     setLast({ address: match.address, name: match.name });
   }, [devices, last?.name, selected]);
 
-  const pick = (address: string, name: string | null) => {
+  const pick = async (address: string, name: string | null) => {
     writeTrainerAddress(address, name);
     setLast({ address, name });
+    await sendCommand('connect', { address });
+    await refresh();
   };
 
-  const sendDevice = async (kind: 'scan' | 'connect' | 'disconnect') => {
-    await sendCommand(kind, kind === 'connect' && selected ? { address: selected } : undefined);
+  const sendDevice = async (kind: 'scan' | 'disconnect') => {
+    await sendCommand(kind);
     await refresh();
   };
 
@@ -178,14 +179,6 @@ export function SettingsPage({ client, tab, settings, onSaved, onUnauthorized }:
                   >
                     {busy && state?.kind === 'scan' ? t('scanning') : t('scan')}
                   </button>
-                  <button
-                    type="button"
-                    disabled={!canConnect}
-                    aria-busy={busy && state?.kind === 'connect'}
-                    onClick={() => void sendDevice('connect')}
-                  >
-                    {t('connectTrainer')}
-                  </button>
                 </>
               )}
               {streaming || linking ? (
@@ -213,8 +206,8 @@ export function SettingsPage({ client, tab, settings, onSaved, onUnauthorized }:
                     <button
                       type="button"
                       aria-pressed={selected === device.address}
-                      disabled={locked || streaming}
-                      onClick={() => pick(device.address, device.name)}
+                      disabled={!canScan}
+                      onClick={() => void pick(device.address, device.name)}
                     >
                       <strong>{device.name || device.address}</strong>
                       <span>

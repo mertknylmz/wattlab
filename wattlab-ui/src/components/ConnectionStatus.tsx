@@ -25,12 +25,13 @@ function BluetoothMark({ slashed }: { slashed?: boolean }) {
 
 interface Props {
   agent: AgentState | null;
+  connecting?: boolean;
 }
 
-export function ConnectionStatus({ agent }: Props) {
+export function ConnectionStatus({ agent, connecting = false }: Props) {
   const { t } = useAppearance();
-  const tone = connectionTone(agent);
-  const label = trainerConnectionLabel(agent, t);
+  const tone = connecting && agent?.connection_state !== 'streaming' ? 'busy' : connectionTone(agent);
+  const label = tone === 'busy' ? t('connectionChipBusy') : trainerConnectionLabel(agent, t);
   const chip =
     tone === 'live'
       ? t('connectionChipLive')
@@ -51,7 +52,7 @@ export function ConnectionStatus({ agent }: Props) {
       data-testid="connection-status"
     >
       <BluetoothMark slashed={tone === 'offline' || tone === 'failed'} />
-      <span className={`status-dot${tone === 'live' ? ' live' : ''}`} />
+      <span className={`status-dot${tone === 'live' ? ' live' : ''}`} aria-hidden="true" />
       <span>{chip}</span>
     </a>
   );

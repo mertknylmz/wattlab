@@ -47,6 +47,16 @@ describe('App', () => {
     cleanup();
   });
 
+  it('shows connection progress before the agent reports connecting', async () => {
+    localStorage.setItem('wattlab.trainerAddress', 'AA:BB:CC:DD:EE:FF');
+    renderApp();
+    await waitFor(() => {
+      const chip = screen.getByTestId('connection-status');
+      expect(chip.className).toContain('busy');
+      expect(chip.textContent).toBe('Connecting');
+    });
+  });
+
   it('opens connection settings from the header status chip', async () => {
     window.location.hash = '#/live';
     renderApp();
@@ -191,7 +201,7 @@ describe('App', () => {
     renderApp();
     expect(await screen.findByText(/Connecting to/)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Scan' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Connect trainer' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Connect trainer' })).toBeNull();
     expect((screen.getByRole('button', { name: 'Disconnect' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -211,7 +221,7 @@ describe('App', () => {
     expect(screen.getAllByText(/Not connected/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Selected F8:07:54:96:B7:43/)).toBeNull();
     expect((screen.getByRole('button', { name: 'Scan' }) as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByRole('button', { name: 'Connect trainer' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Connect trainer' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull();
   });
 
@@ -260,7 +270,9 @@ describe('App', () => {
         );
       }
       if (url === '/api/v1/agent/commands' && options?.method === 'POST') {
-        expect(JSON.parse(String(options.body))).toEqual({ kind: 'scan' });
+        expect(JSON.parse(String(options.body))).toEqual(scanned
+          ? { kind: 'connect', address: 'AA:BB:CC:DD:EE:FF' }
+          : { kind: 'scan' });
         scanned = true;
         return json({
           id: 'scan',
@@ -283,6 +295,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: /D500/ }));
     expect(localStorage.getItem('wattlab.trainerAddress')).toBe('AA:BB:CC:DD:EE:FF');
     expect(localStorage.getItem('wattlab.trainerName')).toBe('D500');
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(2));
   });
 
   it('shows the yearly activity grid on the profile screen', async () => {
