@@ -2,6 +2,12 @@ export type Locale = 'tr' | 'en';
 export type Theme = 'dark' | 'light';
 
 const tr = {
+  crumbWelcome: 'HOŞ GELDİN',
+  welcomeEyebrow: 'SENİN ALANIN. SENİN TEMPOSUN.',
+  welcomeTitle: 'Her pedal bir başlangıç.',
+  welcomeIntro: 'WattLab’e hoş geldin. Canlı güç, kadans ve hız verilerinle antrenmanını takip et; her sürüşte ilerlemeni gör.',
+  welcomeHint: 'Hazır olduğunda canlı görünüme geç, trainer bağlantını kontrol et ve oturumunu başlat.',
+  getStarted: 'Başlayalım',
   checkingAccount: 'Yerel hesap kontrol ediliyor…',
   brandHome: 'WattLab ana sayfa',
   railCaption: 'ANTRENMAN ALANI',
@@ -262,6 +268,12 @@ const tr = {
 } as const;
 
 const en: { [K in keyof typeof tr]: string } = {
+  crumbWelcome: 'WELCOME',
+  welcomeEyebrow: 'YOUR SPACE. YOUR PACE.',
+  welcomeTitle: 'Every ride starts here.',
+  welcomeIntro: 'Welcome to WattLab. Follow your training with live power, cadence and speed, and see your progress with every ride.',
+  welcomeHint: 'When you’re ready, open Live, check your trainer connection and start a session.',
+  getStarted: 'Get started',
   checkingAccount: 'Checking the local account…',
   brandHome: 'WattLab home',
   railCaption: 'TRAINING SPACE',

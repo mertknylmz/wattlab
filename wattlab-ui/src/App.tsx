@@ -8,6 +8,7 @@ import type { MessageKey } from './i18n/messages';
 import { DEFAULT_FTP_W } from './model/zones';
 import { useAgentStatus } from './hooks/useAgentStatus';
 import { useAutoConnect } from './hooks/useAutoConnect';
+import { WelcomePage } from './pages/WelcomePage';
 import { AuthPage } from './pages/AuthPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { LivePage } from './pages/LivePage';
@@ -16,6 +17,7 @@ import { SessionPage } from './pages/SessionPage';
 import { SettingsPage, type SettingsTab } from './pages/SettingsPage';
 
 type Route =
+  | { page: 'welcome' }
   | { page: 'live' }
   | { page: 'history' }
   | { page: 'session'; id: string }
@@ -30,20 +32,26 @@ export function parseRoute(hash: string): Route {
     return { page: 'settings', tab: parts[1] === 'connection' ? 'connection' : 'general' };
   }
   if (parts[0] === 'profile') return { page: 'profile' };
-  return { page: 'live' };
+  if (parts[0] === 'live') return { page: 'live' };
+  return { page: 'welcome' };
 }
 
-function useRoute(): Route {
+function useRoute() {
   const [route, setRoute] = useState(() => parseRoute(window.location.hash));
   useEffect(() => {
     const update = () => setRoute(parseRoute(window.location.hash));
     window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
   }, []);
-  return route;
+  const welcome = useCallback(() => {
+    window.history.replaceState(null, '', '#/welcome');
+    setRoute({ page: 'welcome' });
+  }, []);
+  return { route, welcome };
 }
 
 const TITLES: Record<Route['page'], MessageKey> = {
+  welcome: 'crumbWelcome',
   live: 'crumbLive',
   history: 'crumbHistory',
   session: 'crumbSession',
@@ -69,7 +77,7 @@ export function App({ client: provided }: { client?: ApiClient }) {
 
 function AppShell({ client: provided }: { client?: ApiClient }) {
   const { t } = useAppearance();
-  const route = useRoute();
+  const { route, welcome } = useRoute();
   const client = useMemo(() => provided ?? new ApiClient(), [provided]);
   const [user, setUser] = useState<Member | null | undefined>(undefined);
   const [rememberAvailable, setRememberAvailable] = useState(false);
@@ -78,6 +86,11 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const signOut = useCallback(() => setUser(null), []);
 
+  const signedIn = useCallback((member: Member) => {
+    welcome();
+    setUser(member);
+  }, [welcome]);
+
   useEffect(() => {
     let active = true;
     client.capabilities().then(
@@ -85,7 +98,7 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
       () => active && setRememberAvailable(false),
     );
     client.me().then(
-      (member) => active && setUser(member),
+      (member) => active && signedIn(member),
       (error) => {
         if (!active) return;
         if (error instanceof UnauthorizedError) setUser(null);
@@ -95,7 +108,7 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
     return () => {
       active = false;
     };
-  }, [client]);
+  }, [client, signedIn]);
 
   useEffect(() => {
     if (!user) {
@@ -146,7 +159,7 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
     );
   }
   if (user === null) {
-    return <AuthPage client={client} rememberAvailable={rememberAvailable} onSignedIn={setUser} />;
+    return <AuthPage client={client} rememberAvailable={rememberAvailable} onSignedIn={signedIn} />;
   }
 
   const nav = (page: Route['page'], href: string, label: string) => {
@@ -161,6 +174,9 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
   const ftp = settings?.ftp_w ?? DEFAULT_FTP_W;
   let page = null;
   switch (route.page) {
+    case 'welcome':
+      page = <WelcomePage />;
+      break;
     case 'live':
       page = (
         <LivePage
@@ -204,7 +220,7 @@ function AppShell({ client: provided }: { client?: ApiClient }) {
   return (
     <div className="shell">
       <aside className="rail">
-        <a className="brand" href="#/live" aria-label={t('brandHome')}>
+        <a className="brand" href="#/welcome" aria-label={t('brandHome')}>
           <span className="brand-icon">ϟ</span>Watt<span>Lab</span>
         </a>
         <p className="rail-caption">{t('railCaption')}</p>

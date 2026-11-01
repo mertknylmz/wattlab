@@ -16,3 +16,14 @@ html{color-scheme:dark}:root,:root[data-theme=dark]{color-scheme:dark;--bg:#1014
 :root .connection-chip.busy .status-dot{background:currentColor;width:8px;height:8px;animation:trainer-connecting 1.2s ease-in-out infinite}
 @keyframes trainer-connecting{0%,100%{opacity:1;box-shadow:0 0 0 0 currentColor}50%{opacity:.3;box-shadow:0 0 0 4px transparent}}
 @media(prefers-reduced-motion:reduce){:root .connection-chip.busy .status-dot{animation:none}}
+
+.welcome{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(220px,1fr);align-items:center;gap:32px;min-height:540px;margin:38px 0;padding:48px;border:1px solid var(--card-border);border-radius:18px;background:var(--card)}
+.welcome h1{max-width:460px;font-size:clamp(36px,4vw,58px);line-height:1.08;letter-spacing:-2px;margin:18px 0 24px}
+.welcome-intro{max-width:440px;color:var(--soft);font-size:15px;line-height:1.8;margin:0}
+.welcome-start{display:inline-flex;align-items:center;gap:32px;margin-top:32px;padding:15px 22px;border-radius:8px;background:var(--accent);color:var(--accent-ink);font-size:13px;font-weight:650}
+.welcome-start:hover{box-shadow:0 0 0 3px var(--nav-border)}
+.welcome-hint{max-width:340px;margin:20px 0 0;color:var(--muted);font-size:11px;line-height:1.8}
+.welcome-art{width:100%;max-width:360px;justify-self:center;color:var(--accent)}
+.welcome-orbit{stroke:var(--card-border);stroke-width:1}
+@media(max-width:1100px){.welcome{padding:32px;gap:20px}}
+@media(max-width:850px){.welcome{grid-template-columns:1fr;min-height:0}.welcome-art{max-width:220px}.welcome h1{font-size:40px}}
