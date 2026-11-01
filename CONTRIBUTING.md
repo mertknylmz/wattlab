@@ -2,6 +2,13 @@
 
 Create a branch for each change and open a pull request into `main`. Do not push changes directly to `main`. Individual commit messages are unrestricted.
 
+Name branches `<type>/<issue-number>-<short-description>`, using lowercase words
+separated by hyphens. For example, `fix/3-profile-trainer-ui` or
+`feat/12-session-export`. Use the relevant GitHub issue number and link the PR
+to that issue with `Closes #<number>` when merging should complete the issue.
+This naming convention is documented guidance; the automated check enforces
+PR titles, not branch names.
+
 Pull request titles must use `<type>[optional scope][!]: <description>`.
 Examples:
 
