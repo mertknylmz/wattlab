@@ -27,7 +27,15 @@ const AGENT_IDLE = {
 
 describe('App', () => {
   let fetcher: ReturnType<typeof vi.fn>;
-  const renderApp = () => render(<App client={new ApiClient(fetcher as unknown as typeof fetch)} />);
+  const renderWelcome = () => render(<App client={new ApiClient(fetcher as unknown as typeof fetch)} />);
+  const renderApp = async () => {
+    const target = window.location.hash;
+    const result = renderWelcome();
+    await screen.findByRole('link', { name: 'Get started' });
+    window.location.hash = target;
+    fireEvent(window, new HashChangeEvent('hashchange'));
+    return result;
+  };
 
   beforeEach(() => {
     window.location.hash = '#/settings';
@@ -47,9 +55,64 @@ describe('App', () => {
     cleanup();
   });
 
+  it('welcomes restored sessions and opens Live from Get started', async () => {
+    window.location.hash = '#/history';
+    renderWelcome();
+    const start = await screen.findByRole('link', { name: 'Get started' });
+    expect(window.location.hash).toBe('#/welcome');
+    expect(screen.queryByTestId('ftp-current')).toBeNull();
+    fireEvent.click(start);
+    await waitFor(() => expect(window.location.hash).toBe('#/live'));
+    expect(await screen.findByRole('heading', { name: 'Find your rhythm.' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Every ride starts here.' })).toBeNull();
+  });
+
+  it('localizes welcome and follows the existing theme preference', async () => {
+    renderWelcome();
+    await screen.findByRole('link', { name: 'Get started' });
+    fireEvent.click(screen.getByRole('button', { name: 'TR' }));
+    expect(screen.getByRole('heading', { name: 'Her pedal bir başlangıç.' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Başlayalım' }).getAttribute('href')).toBe('#/live');
+    fireEvent.click(screen.getByRole('button', { name: 'Açık tema' }));
+    expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('welcomes a fresh login even after a previous Live route', async () => {
+    window.location.hash = '#/live';
+    fetcher.mockImplementation((url: string) => {
+      if (url === '/api/v1/auth/me') return json({}, 401);
+      if (url === '/api/v1/auth/login') return json({ member: ME });
+      if (url === '/api/v1/desktop/capabilities') return json({ remember_available: true });
+      if (url === '/api/v1/settings') return json(SETTINGS);
+      return new Promise(() => {});
+    });
+    renderWelcome();
+    await screen.findByRole('heading', { name: 'Sign in' });
+    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'holy' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByRole('link', { name: 'Get started' })).toBeTruthy();
+    expect(window.location.hash).toBe('#/welcome');
+  });
+
+  it('still reconnects the remembered trainer while welcome is open', async () => {
+    localStorage.setItem('wattlab.trainerAddress', 'AA:BB:CC:DD:EE:FF');
+    renderWelcome();
+    await screen.findByRole('link', { name: 'Get started' });
+    await waitFor(() => {
+      const connect = fetcher.mock.calls.find(([url, options]) =>
+        url === '/api/v1/agent/commands' && options?.method === 'POST');
+      expect(connect).toBeTruthy();
+      expect(JSON.parse(String(connect![1].body))).toEqual({
+        kind: 'connect', address: 'AA:BB:CC:DD:EE:FF',
+      });
+    });
+    expect(screen.getByRole('heading', { name: 'Every ride starts here.' })).toBeTruthy();
+  });
+
   it('shows connection progress before the agent reports connecting', async () => {
     localStorage.setItem('wattlab.trainerAddress', 'AA:BB:CC:DD:EE:FF');
-    renderApp();
+    await renderApp();
     await waitFor(() => {
       const chip = screen.getByTestId('connection-status');
       expect(chip.className).toContain('busy');
@@ -59,7 +122,7 @@ describe('App', () => {
 
   it('opens connection settings from the header status chip', async () => {
     window.location.hash = '#/live';
-    renderApp();
+    await renderApp();
     const chip = await screen.findByTestId('connection-status');
     expect(chip.getAttribute('href')).toBe('#/settings/connection');
     window.location.hash = '#/settings/connection';
@@ -68,7 +131,7 @@ describe('App', () => {
   });
 
   it('opens signed-in screens without exposing a token field', async () => {
-    renderApp();
+    await renderApp();
     expect(await screen.findByText(/250 W ·/)).toBeTruthy();
     expect(screen.getByText('holy')).toBeTruthy();
     expect(screen.queryByLabelText('Password')).toBeNull();
@@ -80,7 +143,7 @@ describe('App', () => {
       if (url === '/api/v1/auth/me') return json({}, 401);
       return json({});
     });
-    renderApp();
+    renderWelcome();
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeTruthy();
     expect(screen.getByText(/no encrypted storage/)).toBeTruthy();
   });
@@ -97,13 +160,16 @@ describe('App', () => {
       if (url === '/api/v1/settings') return json(SETTINGS);
       return new Promise(() => {});
     });
-    renderApp();
+    renderWelcome();
     fireEvent.click(await screen.findByRole('button', { name: /No account/ }));
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'holy' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse' } });
     fireEvent.change(screen.getByLabelText('Repeat password'), { target: { value: 'correct horse' } });
+    const remember = screen.getByRole('checkbox', { name: 'Remember me' }) as HTMLInputElement;
+    await waitFor(() => expect(remember.disabled).toBe(false));
+    if (!remember.checked) fireEvent.click(remember);
     fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
-    expect(await screen.findByTestId('ftp-current')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Every ride starts here.' })).toBeTruthy();
   });
 
   it('blocks logout while a ride is active', async () => {
@@ -116,14 +182,14 @@ describe('App', () => {
       }
       return new Promise(() => {});
     });
-    renderApp();
+    await renderApp();
     fireEvent.click(await screen.findByRole('button', { name: 'Log out' }));
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('active ride first'));
     expect(screen.getByText('holy')).toBeTruthy();
   });
 
   it('validates FTP before saving and can reset to the default', async () => {
-    renderApp();
+    await renderApp();
     await screen.findByText(/250 W ·/);
     const input = screen.getByRole('spinbutton');
     for (const invalid of ['0', '2010', '12.5']) {
@@ -177,7 +243,7 @@ describe('App', () => {
       }
       return new Promise(() => {});
     });
-    renderApp();
+    await renderApp();
     await waitFor(() => {
       expect((screen.getByRole('button', { name: 'Disconnect' }) as HTMLButtonElement).disabled).toBe(false);
     }, { timeout: 3000 });
@@ -198,7 +264,7 @@ describe('App', () => {
       if (url === '/api/v1/agent/status') return json({ ...AGENT_IDLE, connection_state: 'connecting' });
       return new Promise(() => {});
     });
-    renderApp();
+    await renderApp();
     expect(await screen.findByText(/Connecting to/)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Scan' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByRole('button', { name: 'Connect trainer' })).toBeNull();
@@ -216,7 +282,7 @@ describe('App', () => {
       if (url === '/api/v1/agent/status') return json(AGENT_IDLE);
       return new Promise(() => {});
     });
-    renderApp();
+    await renderApp();
     expect(await screen.findByText(/Last trainer: D500/)).toBeTruthy();
     expect(screen.getAllByText(/Not connected/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Selected F8:07:54:96:B7:43/)).toBeNull();
@@ -247,7 +313,7 @@ describe('App', () => {
       }
       return new Promise(() => {});
     });
-    renderApp();
+    await renderApp();
     expect(await screen.findByText(/Pick a trainer/)).toBeTruthy();
     expect(posts).toEqual([]);
   });
@@ -287,7 +353,7 @@ describe('App', () => {
       }
       return new Promise(() => {});
     });
-    renderApp();
+    await renderApp();
     const scan = await screen.findByRole('button', { name: 'Scan' });
     expect((scan as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(scan);
@@ -311,7 +377,7 @@ describe('App', () => {
       }
       return new Promise(() => {});
     });
-    renderApp();
+    await renderApp();
     expect(await screen.findByLabelText('Yearly training calendar')).toBeTruthy();
     expect(screen.getByLabelText('Activity year').textContent).toMatch(/2026/);
     expect(screen.getByText('Sun')).toBeTruthy();
@@ -323,7 +389,7 @@ describe('App', () => {
   });
 
   it('switches the whole UI language and theme from the left rail', async () => {
-    renderApp();
+    await renderApp();
     await screen.findByTestId('ftp-current');
     expect(screen.getByRole('heading', { name: 'Your references.' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'TR' }));
@@ -343,7 +409,9 @@ describe('App', () => {
 
 describe('routing and command text', () => {
   it('parses hash routes', () => {
-    expect(parseRoute('')).toEqual({ page: 'live' });
+    expect(parseRoute('')).toEqual({ page: 'welcome' });
+    expect(parseRoute('#/welcome')).toEqual({ page: 'welcome' });
+    expect(parseRoute('#/live')).toEqual({ page: 'live' });
     expect(parseRoute('#/history')).toEqual({ page: 'history' });
     expect(parseRoute('#/history/abc')).toEqual({ page: 'session', id: 'abc' });
     expect(parseRoute('#/settings')).toEqual({ page: 'settings', tab: 'general' });
