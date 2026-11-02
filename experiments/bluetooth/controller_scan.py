@@ -114,5 +114,7 @@ async def discover_controllers(timeout=SCAN_SECONDS):
             advertisement.manufacturer_data or {},
         )
         if entry:
+            # Kept for the connect call. The heartbeat copies named fields only.
+            entry["ble_device"] = device
             devices.append(entry)
     return rank_controllers(devices)

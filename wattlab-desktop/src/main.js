@@ -13,6 +13,7 @@ const {
   resolvePaths,
   runStep,
   running,
+  reapLeakedAgents,
   spawnOwned,
   stopOwned,
   waitReady,
@@ -167,6 +168,7 @@ async function start() {
     });
 
     if (process.env.WATTLAB_DESKTOP_TRAINER !== '0') {
+      await reapLeakedAgents(paths.agent, log);
       state.agent = spawnOwned('agent', paths.python, ['-u', paths.agent], owned);
       state.agent.exited.then(() => {
         if (!state.quitting) log('[desktop] trainer agent stopped; the screen shows it as not running.');

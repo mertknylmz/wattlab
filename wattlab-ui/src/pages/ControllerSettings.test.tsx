@@ -106,7 +106,9 @@ describe('Zwift controller settings', () => {
       }),
     );
     expect((await screen.findByTestId('controller-status')).textContent).toBe('Connecting: Zwift Play · Play · left');
+    expect((screen.getByRole('button', { name: 'Scan controllers' }) as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByRole('button', { name: 'Connect controllers' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Disconnect controllers' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('shows connecting, connected, and failed controller states', async () => {

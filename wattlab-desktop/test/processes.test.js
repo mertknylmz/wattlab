@@ -12,6 +12,7 @@ const {
   redact,
   resolvePaths,
   running,
+  leakedAgentPids,
   spawnOwned,
   stopOwned,
   waitReady,
@@ -23,6 +24,20 @@ test('launch tokens satisfy the API token rules and differ per launch', () => {
   const first = generateToken();
   assert.match(first, /^[A-Za-z0-9_-]{32,64}$/);
   assert.notEqual(first, generateToken());
+});
+
+test('leaked agent lookup matches only the trainer agent command', () => {
+  const fsImpl = {
+    readdirSync() {
+      return ['1', 'not-a-pid', '2'];
+    },
+    readFileSync(file) {
+      if (file === '/proc/1/cmdline') return Buffer.from('python\0trainer_agent.py\0');
+      if (file === '/proc/2/cmdline') return Buffer.from('python\0something_else.py\0');
+      throw new Error('missing');
+    },
+  };
+  assert.deepEqual(leakedAgentPids('/tmp/trainer_agent.py', fsImpl), [1]);
 });
 
 test('child output never forwards the token', () => {

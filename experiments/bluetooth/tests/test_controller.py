@@ -20,6 +20,8 @@ from zwift_buttons import report_kind
 from zwift_controller import (
     SYNC_TX,
     ControllerLink,
+    _notify_kwargs,
+    _radio_error,
     handshake_request,
     parse_device_public_key,
 )
@@ -75,18 +77,28 @@ class ScanTests(unittest.TestCase):
         )
 
 
+class RadioErrorTests(unittest.TestCase):
+    def test_failure_text_keeps_a_phrase_and_drops_an_address(self):
+        self.assertEqual(
+            _radio_error(RuntimeError("failed to discover services, device disconnected")),
+            "RuntimeError: failed to discover services, device disconnected",
+        )
+        hidden = _radio_error(RuntimeError("device 'dev_AA_BB_CC_DD_EE_FF' not found"))
+        self.assertEqual(hidden, "RuntimeError: device 'dev_[redacted]' not found")
+        self.assertNotIn("AA_BB", hidden)
+
 class HandshakeTests(unittest.TestCase):
     def test_ride_on_request_and_the_three_device_replies(self):
         request = handshake_request(public_key())
         self.assertTrue(request.startswith(b"RideOn\x01\x02"))
         self.assertEqual(len(request), 8 + 64)
-        for tag in (b"\x01\x03", b"\x01\x04", b"\x00\x09"):
+        for tag in (b"\x01\x01", b"\x01\x03", b"\x01\x04", b"\x00\x09", b"\x02\x03"):
             key = parse_device_public_key(reply(tag))
             self.assertEqual(len(key), 64)
         self.assertIsNone(parse_device_public_key(b"RideOn\x01\x02" + b"\x11" * 64))
         self.assertIsNone(parse_device_public_key(b"\x37\x00"))
-        with self.assertRaises(ValueError):
-            parse_device_public_key(b"RideOn\x01\x03\x00")
+        self.assertIsNone(parse_device_public_key(b"RideOn\x01\x03\x00"))
+        self.assertEqual(_notify_kwargs(SYNC_TX), {"bluez": {"use_start_notify": True}})
 
     def test_button_reports_are_recognized_without_raising(self):
         self.assertEqual(report_kind(b"\x37\x08\x01"), "click")
@@ -100,15 +112,22 @@ class HandshakeTests(unittest.TestCase):
             lambda address: None,
             attempt_timeout=0.05,
         )
-        link._on_sync(None, b"RideOn\x01\x03" + b"\x00" * 64)
         link._ready = asyncio.Event()
-        link._on_sync(None, reply(b"\x01\x03", b"\x00" * 64))
-        link._on_sync(None, b"RideOn\x00\x09\x01")
+        link._on_sync(None, reply(b"\x02\x03", b"\x00" * 64))
         link._on_async(None, b"\x37\x00")
         link._on_async(None, None)
         self.assertTrue(link._ready.is_set())
         self.assertIsNone(link._peer_key)
-        self.assertIsNotNone(link._error)
+        self.assertIsNone(link._error)
+        self.assertIsNotNone(link._answered)
+        other = ControllerLink(
+            {"address": "AA:BB:CC:DD:EE:09", "name": "Zwift Click", "kind": "click", "side": None},
+            lambda address: None,
+        )
+        other._ready = asyncio.Event()
+        raw = public_key()[1:]
+        other._on_sync(None, b"RideOn\x01\x03" + raw)
+        self.assertEqual(other._peer_key, raw)
 
 
 class ScriptedClient:
@@ -134,8 +153,8 @@ class ScriptedClient:
         callback = self.callbacks[SYNC_TX]
         if self.mode == "ok":
             callback(None, reply(b"\x01\x03"))
-        elif self.mode == "invalid":
-            callback(None, reply(b"\x01\x04", b"\x00" * 64))
+        elif self.mode == "status":
+            callback(None, b"RideOn\x02\x03" + b"\x00" * 64)
         elif self.mode == "silent":
             return
         elif self.mode == "down":
@@ -177,6 +196,19 @@ class LinkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(link.state, "failed")
         self.assertEqual(link.message, "controller_connect_timeout")
 
+    async def test_reply_that_is_not_a_point_stays_connected(self):
+        def factory(address):
+            return ScriptedClient(address, "status")
+
+        link = ControllerLink(
+            {"address": "AA:BB:CC:DD:EE:05", "name": "Zwift Click", "kind": "click", "side": None},
+            factory,
+            attempt_timeout=1,
+        )
+        await link.connect()
+        self.assertEqual(link.state, "connected")
+        self.assertIsNone(link._peer_key)
+
 
 class AgentControllerTests(unittest.IsolatedAsyncioTestCase):
     def agent(self, found, modes):
@@ -197,6 +229,9 @@ class AgentControllerTests(unittest.IsolatedAsyncioTestCase):
             connection = SimpleNamespace(handlers=handlers, address=address, stop=stopped.set)
 
             async def run():
+                prepare = hooks.get("on_prepare")
+                if prepare is not None:
+                    await prepare()
                 hooks["on_state"]("STREAMING")
                 await stopped.wait()
 
@@ -217,6 +252,11 @@ class AgentControllerTests(unittest.IsolatedAsyncioTestCase):
     async def empty_scan(self):
         return []
 
+    async def finished(self, agent):
+        pending = [task for task in agent.controller_tasks if not task.done()]
+        if pending:
+            await asyncio.gather(*pending)
+
     def play_pair(self):
         return [
             {"address": "AA:BB:CC:DD:EE:02", "name": "Zwift Play", "rssi": -60, "kind": "play", "side": "left"},
@@ -231,7 +271,8 @@ class AgentControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await agent.handle("scan_controllers", {}), (True, "found:3"))
         selected = [item["address"] for item in agent.status()["controller_devices"] if item["selected"]]
         self.assertEqual(selected, ["AA:BB:CC:DD:EE:02", "AA:BB:CC:DD:EE:03"])
-        self.assertEqual(await agent.handle("connect_controller", {}), (True, "connected:2"))
+        self.assertEqual(await agent.handle("connect_controller", {}), (True, "connecting"))
+        await self.finished(agent)
         links = {item["address"]: item for item in agent.status()["controllers"]}
         self.assertEqual(links["AA:BB:CC:DD:EE:02"]["state"], "connected")
         self.assertEqual(links["AA:BB:CC:DD:EE:02"]["side"], "left")
@@ -242,6 +283,19 @@ class AgentControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(item["state"] == "disconnected" for item in agent.status()["controllers"]))
         self.assertEqual(await agent.handle("disconnect_controller", {}), (True, "already_disconnected"))
         await agent.handle("disconnect", {})
+
+    async def test_connected_trainer_is_not_offered_as_a_remote(self):
+        devices = self.play_pair()
+        devices.append({
+            "address": "AA:BB:CC:DD:EE:FF", "name": "D500", "rssi": -20,
+            "kind": "click", "side": None, "ble_device": object(),
+        })
+        agent = self.agent(devices, [])
+        await agent.handle("connect", {"address": "AA:BB:CC:DD:EE:FF"})
+        self.assertEqual(await agent.handle("scan_controllers", {}), (True, "found:3"))
+        reported = agent.status()["controller_devices"]
+        self.assertNotIn("AA:BB:CC:DD:EE:FF", [item["address"] for item in reported])
+        self.assertTrue(all("ble_device" not in item for item in reported))
 
     async def test_missing_scan_and_failed_links_are_reported(self):
         agent = self.agent([], [])
@@ -260,7 +314,8 @@ class AgentControllerTests(unittest.IsolatedAsyncioTestCase):
         agent.controller_client_factory = lambda address: ScriptedClient(address, "silent")
         agent.controller_attempt_timeout = 0.05
         self.assertEqual(await agent.handle("scan_controllers", {}), (True, "found:1"))
-        self.assertEqual(await agent.handle("connect_controller", {}), (False, "controller_connect_failed"))
+        self.assertEqual(await agent.handle("connect_controller", {}), (True, "connecting"))
+        await self.finished(agent)
         self.assertEqual(agent.status()["controllers"][0]["state"], "failed")
         self.assertEqual(agent.status()["controllers"][0]["message"], "controller_connect_timeout")
 
@@ -270,6 +325,7 @@ class AgentControllerTests(unittest.IsolatedAsyncioTestCase):
         await agent.handle("connect_controller", {})
         self.assertEqual(await agent.handle("connect", {"address": "AA:BB:CC:DD:EE:10"}), (True, "connected"))
         self.assertIn("AA:BB:CC:DD:EE:02", self.dropped)
+        self.assertIn("AA:BB:CC:DD:EE:10", self.dropped)
         self.assertTrue(all(item["state"] == "disconnected" for item in agent.status()["controllers"]))
         self.assertEqual(agent.status()["trainer_address"], "AA:BB:CC:DD:EE:10")
         self.assertEqual(agent.status()["connection_state"], "streaming")
