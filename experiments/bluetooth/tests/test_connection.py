@@ -100,6 +100,41 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
     async def ready(self):
         await asyncio.wait_for(self.streaming.get(), .5)
 
+    async def test_notifications_pause_without_dropping_the_link(self):
+        client = FakeClient()
+        manager = self.manager([client])
+        task = asyncio.create_task(manager.run())
+        await self.ready()
+        started = len(client.started)
+        await manager.pause_notifications()
+        self.assertEqual(len(client.stopped), started)
+        self.assertTrue(client.is_connected)
+        await manager.resume_notifications()
+        self.assertEqual(len(client.started), started * 2)
+        self.assertTrue(client.is_connected)
+        manager.stop()
+        await asyncio.wait_for(task, .5)
+
+    async def test_prepare_runs_before_the_radio_connect(self):
+        order = []
+        client = FakeClient()
+        manager = self.manager([client])
+
+        async def prepare():
+            order.append('prepare')
+
+        async def connect():
+            order.append('connect')
+            await FakeClient.connect(client)
+
+        client.connect = connect
+        manager.on_prepare = prepare
+        task = asyncio.create_task(manager.run())
+        await self.ready()
+        manager.stop()
+        await asyncio.wait_for(task, .5)
+        self.assertEqual(order[:2], ['prepare', 'connect'])
+
     async def test_disconnect_reconnect_and_stale_callbacks(self):
         first, second = FakeClient(), FakeClient(chars=(POWER,))
         manager = self.manager([first, second])

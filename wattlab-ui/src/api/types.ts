@@ -26,6 +26,28 @@ export interface NearbyDevice {
   rssi: number | null;
 }
 
+export type ControllerKind = 'click' | 'play';
+export type ControllerSide = 'left' | 'right';
+export type ControllerLinkState = 'connecting' | 'connected' | 'disconnected' | 'failed';
+
+export interface ControllerDevice {
+  address: string;
+  name: string | null;
+  rssi: number | null;
+  kind: ControllerKind;
+  side: ControllerSide | null;
+  selected: boolean;
+}
+
+export interface ControllerLink {
+  address: string;
+  name: string | null;
+  kind: ControllerKind;
+  side: ControllerSide | null;
+  state: ControllerLinkState;
+  message: string | null;
+}
+
 export interface AgentState {
   online: boolean;
   agent_id: string | null;
@@ -36,6 +58,8 @@ export interface AgentState {
   target_power_w: number | null;
   trainer_address: string | null;
   devices: NearbyDevice[];
+  controller_devices?: ControllerDevice[];
+  controllers?: ControllerLink[];
   last_seen_at: string | null;
 }
 
@@ -117,7 +141,10 @@ export type CommandKind =
   | 'start_session'
   | 'finish_session'
   | 'set_target_power'
-  | 'release_control';
+  | 'release_control'
+  | 'scan_controllers'
+  | 'connect_controller'
+  | 'disconnect_controller';
 
 export interface CommandPayload {
   targetPowerW?: number;

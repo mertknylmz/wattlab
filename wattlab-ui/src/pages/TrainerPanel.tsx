@@ -12,6 +12,9 @@ const ACTIONS: Record<CommandKind, MessageKey> = {
   finish_session: 'actionFinish',
   set_target_power: 'actionTarget',
   release_control: 'actionRelease',
+  scan_controllers: 'actionScanControllers',
+  connect_controller: 'actionConnectControllers',
+  disconnect_controller: 'actionDisconnectControllers',
 };
 
 const REASONS: Record<string, MessageKey> = {
@@ -32,6 +35,9 @@ const REASONS: Record<string, MessageKey> = {
   connect_timeout: 'reasonConnectTimeout',
   already_connected: 'reasonAlreadyConnected',
   scan_failed: 'reasonScanFailed',
+  no_controllers: 'reasonNoControllers',
+  controller_connect_failed: 'reasonControllerConnectFailed',
+  controller_connect_timeout: 'reasonControllerConnectTimeout',
 };
 
 const STATES: Record<string, MessageKey> = {

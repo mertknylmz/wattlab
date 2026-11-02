@@ -41,7 +41,7 @@ class FakeSender:
 
 
 class FakeConnection:
-    def __init__(self, handlers, on_state, on_ready, on_lost):
+    def __init__(self, handlers, on_state, on_ready, on_lost, **_hooks):
         self.handlers, self.on_state, self.on_ready, self.on_lost = handlers, on_state, on_ready, on_lost
         self._stop = asyncio.Event()
 
@@ -95,9 +95,12 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             self.connections.append(connection)
             return connection
 
+        async def drop(_addresses):
+            return None
+
         return TrainerAgent(SimpleNamespace(), connection_factory=connection_factory,
                             sender_factory=sender_factory, control_factory=control,
-                            scanner=self.scanner)
+                            scanner=self.scanner, drop_leftovers=drop)
 
     async def scanner(self):
         return [{"address": "AA:BB:CC:DD:EE:FF", "name": "D500", "rssi": -40,

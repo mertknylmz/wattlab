@@ -55,7 +55,7 @@ def telemetry_characteristics(services):
 class TrainerConnection:
     def __init__(self, address, client_factory, handlers, *, settings=None,
                  retry_errors=(OSError, TimeoutError), on_state=None,
-                 on_ready=None, on_lost=None,
+                 on_ready=None, on_lost=None, on_prepare=None,
                  clock=time.monotonic, sleep=asyncio.sleep):
         self.clock = clock
         self.sleep = sleep
@@ -71,10 +71,15 @@ class TrainerConnection:
         # point) and returns them so this owner cleans them up with the rest.
         self.on_ready = on_ready
         self.on_lost = on_lost or (lambda: None)
+        # Drops a leftover radio link before Bleak connects. An already-connected
+        # trainer makes the next connect time out instead of streaming.
+        self.on_prepare = on_prepare
         self._stop = asyncio.Event()
         self._running = False
         self._generation = 0
         self._stream_started = None
+        self._client = None
+        self._telemetry = []
 
     def stop(self):
         self._stop.set()
@@ -101,6 +106,11 @@ class TrainerConnection:
         def lost(_):
             loop.call_soon_threadsafe(disconnected.set)
 
+        if self.on_prepare is not None:
+            try:
+                await self.on_prepare()
+            except Exception as exc:
+                log.warning("Radio prepare failed (%s)", type(exc).__name__)
         client = self.client_factory(self.address, disconnected_callback=lost,
                                      timeout=self.settings.timeout)
         subscribed = []
@@ -119,6 +129,8 @@ class TrainerConnection:
 
                 await asyncio.wait_for(client.start_notify(char, receive), self.settings.timeout)
                 subscribed.append(char)
+                self._telemetry.append((char, receive))
+            self._client = client
             if self.on_ready is not None:
                 try:
                     subscribed.extend(await asyncio.wait_for(self.on_ready(client), self.settings.timeout))
@@ -132,6 +144,8 @@ class TrainerConnection:
             await disconnected.wait()
             raise ConnectionError("Trainer disconnected")
         finally:
+            self._client = None
+            self._telemetry = []
             self._stable = (self._stream_started is not None and
                             self.clock() - self._stream_started >= self.settings.stable_after)
             self._generation += 1  # Ignore callbacks from the previous connection.
@@ -142,6 +156,31 @@ class TrainerConnection:
             except asyncio.CancelledError:
                 await cleanup
                 raise
+
+    async def pause_notifications(self):
+        """Stop trainer notifies so another device can finish service discovery.
+
+        BlueZ does not resolve a second device's GATT services while this
+        trainer is streaming. The connection itself stays up.
+        """
+        client = self._client
+        if client is None:
+            return
+        for char, _callback in list(self._telemetry):
+            try:
+                await asyncio.wait_for(client.stop_notify(char), self.settings.cleanup_timeout)
+            except Exception as exc:
+                log.warning("Trainer notify pause failed (%s)", type(exc).__name__)
+
+    async def resume_notifications(self):
+        client = self._client
+        if client is None or not client.is_connected:
+            return
+        for char, callback in list(self._telemetry):
+            try:
+                await asyncio.wait_for(client.start_notify(char, callback), self.settings.timeout)
+            except Exception as exc:
+                log.warning("Trainer notify resume failed (%s)", type(exc).__name__)
 
     async def _until_stop(self, operation):
         task = asyncio.create_task(operation)

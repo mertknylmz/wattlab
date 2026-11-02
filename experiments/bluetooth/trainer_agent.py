@@ -13,12 +13,16 @@ from uuid import UUID, uuid4
 
 import aiohttp
 
+from controller_scan import choose_controllers, discover_controllers, rank_controllers
 from ftms_control import ControlRejected, ControlUnavailable, FtmsControl
 from ftms_parser import parse_cycling_power, parse_indoor_bike_data
 from telemetry import TelemetryEvents
 from telemetry_sender import PermanentDeliveryError, TelemetrySender
 from trainer_connection import BIKE, POWER
 from trainer_scan import discover_devices, rank_devices
+from zwift_controller import (
+    BleakControllerClient, ControllerLink, drop_bluez_connections, stop_discovery,
+)
 
 log = logging.getLogger(__name__)
 HEARTBEAT_SECONDS = 1.0
@@ -36,12 +40,18 @@ class Recording:
 
 class TrainerAgent:
     def __init__(self, api, *, connection_factory, sender_factory, control_factory=FtmsControl,
-                 control_errors=(OSError, TimeoutError), scanner=None, agent_id=None):
+                 control_errors=(OSError, TimeoutError), scanner=None, agent_id=None,
+                 controller_scanner=None, controller_client_factory=None, drop_leftovers=None,
+                 controller_attempt_timeout=None):
         self.api = api
         self.connection_factory = connection_factory
         self.sender_factory = sender_factory
         self.control_factory = control_factory
         self.scanner = scanner or discover_devices
+        self.controller_scanner = controller_scanner or discover_controllers
+        self.controller_client_factory = controller_client_factory or BleakControllerClient
+        self.drop_leftovers = drop_leftovers or drop_bluez_connections
+        self.controller_attempt_timeout = controller_attempt_timeout
         # Transport errors of the BLE library (e.g. BleakError) during control.
         self.control_errors = tuple(control_errors) + (ControlUnavailable,)
         self.agent_id = agent_id or str(uuid4())
@@ -50,6 +60,9 @@ class TrainerAgent:
         self.connection_task = None
         self.trainer_address = None
         self.devices = []
+        self.controller_devices = []
+        self.controllers = {}
+        self.controller_tasks = []
         self.recording = None
         self.control = None
         self._stop = asyncio.Event()
@@ -108,6 +121,18 @@ class TrainerAgent:
                 {"address": item["address"], "name": item.get("name"), "rssi": item.get("rssi")}
                 for item in self.devices
             ],
+            "controller_devices": [
+                {
+                    "address": item["address"],
+                    "name": item.get("name"),
+                    "rssi": item.get("rssi"),
+                    "kind": item["kind"],
+                    "side": item.get("side"),
+                    "selected": bool(item.get("selected")),
+                }
+                for item in self.controller_devices
+            ],
+            "controllers": [link.snapshot() for link in self.controllers.values()],
         }
 
     # --- Commands --------------------------------------------------------------
@@ -127,6 +152,12 @@ class TrainerAgent:
             return await self._set_target(command.get("target_power_w"))
         if kind == "release_control":
             return await self._release()
+        if kind == "scan_controllers":
+            return await self._scan_controllers()
+        if kind == "connect_controller":
+            return await self._connect_controllers()
+        if kind == "disconnect_controller":
+            return await self._disconnect_controllers()
         return False, "unsupported_command"
 
     async def _scan(self):
@@ -140,6 +171,114 @@ class TrainerAgent:
         self.devices = rank_devices(found)
         return True, f"found:{len(self.devices)}"
 
+    async def _scan_controllers(self):
+        # Trainer streaming must not block this. The trainer scan stays refused
+        # while a trainer link is up; controllers are a second radio use.
+        try:
+            found = await self.controller_scanner()
+        except (OSError, TimeoutError, RuntimeError) as exc:
+            log.warning("Controller scan failed (%s)", type(exc).__name__)
+            return False, "scan_failed"
+        self.controller_devices = rank_controllers(self._without_trainer(found))
+        return True, f"found:{len(self.controller_devices)}"
+
+    def _without_trainer(self, devices):
+        # The trainer advertises a Zwift service too. It is not a remote.
+        return [item for item in devices if item.get("address") != self.trainer_address]
+
+    def _controller_busy(self):
+        return any(link.state == "connecting" for link in self.controllers.values())
+
+    async def _connect_controllers(self):
+        if self._controller_busy():
+            return False, "already_connected"
+        chosen = choose_controllers(self._without_trainer(self.controller_devices))
+        if not chosen:
+            return False, "no_controllers"
+        pending = [
+            device for device in chosen
+            if self.controllers.get(device["address"]) is None
+            or self.controllers[device["address"]].state != "connected"
+        ]
+        if not pending:
+            return True, "already_connected"
+        self.controller_tasks = [task for task in self.controller_tasks if not task.done()]
+        links = []
+        for device in pending:
+            kwargs = {}
+            if self.controller_attempt_timeout is not None:
+                kwargs["attempt_timeout"] = self.controller_attempt_timeout
+            link = ControllerLink(device, self.controller_client_factory, **kwargs)
+            self.controllers[device["address"]] = link
+            link.arm()
+            links.append(link)
+        # One radio connect at a time. A second Connect while the first is
+        # opening is rejected by BlueZ. The command itself returns immediately.
+        self.controller_tasks.append(asyncio.create_task(self._open_controllers(links)))
+        return True, "connecting"
+
+    async def _quiet_trainer(self):
+        """Pause trainer notifications around one controller attempt."""
+        connection = self.connection
+        pause = getattr(connection, "pause_notifications", None)
+        resume = getattr(connection, "resume_notifications", None)
+        paused = False
+        if pause is not None:
+            try:
+                await pause()
+                paused = True
+            except Exception as exc:
+                log.warning("Trainer notify pause failed (%s)", type(exc).__name__)
+
+        class Quiet:
+            async def __aexit__(self, *_args):
+                if paused and resume is not None:
+                    try:
+                        await resume()
+                    except Exception as exc:
+                        log.warning("Trainer notify resume failed (%s)", type(exc).__name__)
+
+            async def __aenter__(self):
+                return self
+
+        return Quiet()
+
+    async def _open_controllers(self, links):
+        await stop_discovery()
+        for index, link in enumerate(links):
+            if not link._run:
+                break
+            if index:
+                await asyncio.sleep(0.25)
+            async with await self._quiet_trainer():
+                await link.connect()
+
+    async def _disconnect_controller_links(self):
+        links = list(self.controllers.values())
+        if links:
+            await asyncio.gather(*(link.disconnect() for link in links))
+        tasks = [task for task in self.controller_tasks if not task.done()]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self.controller_tasks = []
+
+    async def _disconnect_controllers(self):
+        active = any(link.state in ("connecting", "connected") for link in self.controllers.values())
+        await self._disconnect_controller_links()
+        if not active:
+            return True, "already_disconnected"
+        return True, "disconnected"
+
+    async def _release_controllers_for_trainer(self):
+        # A Click or Play still held by BlueZ makes the trainer connect time out.
+        addresses = [item["address"] for item in self.controller_devices]
+        addresses.extend(link.address for link in self.controllers.values())
+        await self._disconnect_controller_links()
+        try:
+            await self.drop_leftovers(addresses)
+        except Exception as exc:
+            log.warning("Leftover controller disconnect failed (%s)", type(exc).__name__)
+
     async def _connect(self, address):
         if not address:
             return False, "trainer_not_configured"
@@ -147,11 +286,22 @@ class TrainerAgent:
             if self.connection_state == "streaming" and self.trainer_address == address:
                 return True, "already_connected"
             return False, "already_connected"
+        await self._release_controllers_for_trainer()
+        # A previous app launch can leave this trainer connected in BlueZ.
+        # Bleak then waits until the command times out and never streams.
         try:
+            await self.drop_leftovers([address])
+        except Exception as exc:
+            log.warning("Leftover trainer disconnect failed (%s)", type(exc).__name__)
+        try:
+            async def prepare():
+                await self.drop_leftovers([address])
+
             self.connection = self.connection_factory(
                 address,
                 {BIKE: self._bike, POWER: self._power},
-                on_state=self._state, on_ready=self._ready, on_lost=self._lost)
+                on_state=self._state, on_ready=self._ready, on_lost=self._lost,
+                on_prepare=prepare)
         except (RuntimeError, ValueError):
             return False, "trainer_not_configured"
         self.trainer_address = address
@@ -174,6 +324,12 @@ class TrainerAgent:
         except Exception as exc:  # The agent survives; the state shows the failure.
             log.error("Trainer connection ended (%s)", type(exc).__name__)
             self.connection_state = "failed"
+            # A timed-out Bleak connect can leave the radio link up. Drop it
+            # so the next attempt is not stuck behind that connection.
+            try:
+                await self.drop_leftovers([self.trainer_address])
+            except Exception as drop_exc:
+                log.warning("Leftover trainer disconnect failed (%s)", type(drop_exc).__name__)
 
     async def _disconnect(self):
         if self.connection_task is None or self.connection_task.done():
@@ -256,10 +412,11 @@ class TrainerAgent:
             try:
                 await self.api.heartbeat(self.status())
                 failures = 0
-            except (aiohttp.ClientError, OSError, TimeoutError, RuntimeError):
+            except (aiohttp.ClientError, OSError, TimeoutError, RuntimeError) as exc:
                 failures += 1
                 if failures == 1:
-                    log.warning("Heartbeat failed; retrying")
+                    # The message is a status code, never the payload or token.
+                    log.warning("Heartbeat failed (%s); retrying", exc)
             try:
                 await asyncio.wait_for(self._stop.wait(), HEARTBEAT_SECONDS)
             except TimeoutError:
@@ -311,6 +468,7 @@ class TrainerAgent:
             # release resistance and disconnect.
             await self._finish_session()
             await self._disconnect()
+            await self._disconnect_controller_links()
 
 
 async def main():

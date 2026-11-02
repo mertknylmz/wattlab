@@ -49,6 +49,53 @@ function resolvePaths(root, env = process.env) {
   };
 }
 
+/** Previous desktop launches leave a detached trainer agent if the window is
+ * killed. That agent keeps the trainer connected and the next launch times out.
+ */
+function leakedAgentPids(agentPath, fsImpl = fs) {
+  if (process.platform !== 'linux' || !agentPath) return [];
+  const needle = Buffer.from(path.basename(agentPath));
+  const pids = [];
+  let names = [];
+  try {
+    names = fsImpl.readdirSync('/proc');
+  } catch {
+    return [];
+  }
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    let raw = null;
+    try {
+      raw = fsImpl.readFileSync(`/proc/${name}/cmdline`);
+    } catch {
+      continue;
+    }
+    if (raw && raw.includes(needle)) pids.push(Number(name));
+  }
+  return pids;
+}
+
+async function reapLeakedAgents(agentPath, log = console.log, fsImpl = fs) {
+  const signal = (pid, name) => {
+    try {
+      process.kill(pid, name);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const found = leakedAgentPids(agentPath, fsImpl);
+  for (const pid of found) {
+    if (signal(pid, 'SIGTERM')) log(`[desktop] stopped leftover trainer agent ${pid}`);
+  }
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && leakedAgentPids(agentPath, fsImpl).length) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  for (const pid of leakedAgentPids(agentPath, fsImpl)) signal(pid, 'SIGKILL');
+  return found;
+}
+
 /** Child output may echo configuration; never forward the token. */
 function redact(text, secrets) {
   return secrets.filter(Boolean).reduce((value, secret) => value.split(secret).join('[REDACTED]'), text);
@@ -154,6 +201,8 @@ module.exports = {
   resolvePaths,
   runStep,
   running,
+  leakedAgentPids,
+  reapLeakedAgents,
   spawnOwned,
   stopOwned,
   waitReady,

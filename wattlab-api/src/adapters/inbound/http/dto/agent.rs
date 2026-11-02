@@ -1,8 +1,8 @@
 use crate::{
     application::command_service::AgentView,
     domain::command::{
-        AgentStatus, Command, CommandError, CommandKind, CommandStatus, NearbyDevice,
-        parse_ble_address,
+        AgentStatus, Command, CommandError, CommandKind, CommandStatus, ControllerDevice,
+        ControllerLink, NearbyDevice, parse_ble_address,
     },
 };
 use chrono::{DateTime, Utc};
@@ -19,6 +19,9 @@ pub(crate) enum CommandRequest {
     FinishSession,
     SetTargetPower { target_power_w: i64 },
     ReleaseControl,
+    ScanControllers,
+    ConnectController,
+    DisconnectController,
 }
 impl TryFrom<CommandRequest> for CommandKind {
     type Error = CommandError;
@@ -33,6 +36,9 @@ impl TryFrom<CommandRequest> for CommandKind {
                 Self::set_target_power(target_power_w)?
             }
             CommandRequest::ReleaseControl => Self::ReleaseControl,
+            CommandRequest::ScanControllers => Self::ScanControllers,
+            CommandRequest::ConnectController => Self::ConnectController,
+            CommandRequest::DisconnectController => Self::DisconnectController,
         })
     }
 }
@@ -58,6 +64,9 @@ impl From<Command> for CommandResponse {
             CommandKind::FinishSession => ("finish_session", None, None),
             CommandKind::SetTargetPower { watts } => ("set_target_power", Some(*watts), None),
             CommandKind::ReleaseControl => ("release_control", None, None),
+            CommandKind::ScanControllers => ("scan_controllers", None, None),
+            CommandKind::ConnectController => ("connect_controller", None, None),
+            CommandKind::DisconnectController => ("disconnect_controller", None, None),
         };
         Self {
             id: command.id(),
@@ -129,6 +138,86 @@ impl NearbyDeviceDto {
     }
 }
 
+fn clipped_name(name: Option<String>) -> Option<String> {
+    name.map(|name| name.chars().take(48).collect::<String>())
+        .filter(|name| !name.is_empty())
+}
+
+fn controller_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "click" => Some("click"),
+        "play" => Some("play"),
+        _ => None,
+    }
+}
+
+fn controller_side(kind: &str, side: Option<String>) -> Option<String> {
+    if kind == "click" {
+        return None;
+    }
+    side.filter(|value| value == "left" || value == "right")
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ControllerDeviceDto {
+    address: String,
+    name: Option<String>,
+    rssi: Option<i16>,
+    kind: String,
+    side: Option<String>,
+    #[serde(default)]
+    selected: bool,
+}
+impl ControllerDeviceDto {
+    fn into_domain(self) -> Option<ControllerDevice> {
+        let kind = controller_kind(&self.kind)?;
+        let address = parse_ble_address(&self.address).ok()?;
+        let rssi_ok = self.rssi.is_none_or(|rssi| (-127..=20).contains(&rssi));
+        rssi_ok.then(|| ControllerDevice {
+            address,
+            name: clipped_name(self.name),
+            rssi: self.rssi,
+            kind: kind.to_owned(),
+            side: controller_side(kind, self.side),
+            selected: self.selected,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ControllerLinkDto {
+    address: String,
+    name: Option<String>,
+    kind: String,
+    side: Option<String>,
+    state: String,
+    #[serde(default)]
+    message: Option<String>,
+}
+impl ControllerLinkDto {
+    fn into_domain(self) -> Option<ControllerLink> {
+        const STATES: [&str; 4] = ["connecting", "connected", "disconnected", "failed"];
+        let kind = controller_kind(&self.kind)?;
+        if !STATES.contains(&self.state.as_str()) {
+            return None;
+        }
+        let address = parse_ble_address(&self.address).ok()?;
+        Some(ControllerLink {
+            address,
+            name: clipped_name(self.name),
+            kind: kind.to_owned(),
+            side: controller_side(kind, self.side),
+            state: self.state,
+            message: self
+                .message
+                .map(|message| message.chars().take(80).collect::<String>())
+                .filter(|message| !message.is_empty()),
+        })
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct HeartbeatRequest {
@@ -142,6 +231,10 @@ pub(crate) struct HeartbeatRequest {
     trainer_address: Option<String>,
     #[serde(default)]
     devices: Vec<NearbyDeviceDto>,
+    #[serde(default)]
+    controller_devices: Vec<ControllerDeviceDto>,
+    #[serde(default)]
+    controllers: Vec<ControllerLinkDto>,
 }
 impl HeartbeatRequest {
     pub fn into_domain(self, received_at: DateTime<Utc>) -> Option<AgentStatus> {
@@ -168,6 +261,18 @@ impl HeartbeatRequest {
                     .filter_map(NearbyDeviceDto::into_domain)
                     .take(24)
                     .collect(),
+                controller_devices: self
+                    .controller_devices
+                    .into_iter()
+                    .filter_map(ControllerDeviceDto::into_domain)
+                    .take(8)
+                    .collect(),
+                controllers: self
+                    .controllers
+                    .into_iter()
+                    .filter_map(ControllerLinkDto::into_domain)
+                    .take(8)
+                    .collect(),
                 received_at,
             })
     }
@@ -181,6 +286,26 @@ struct NearbyDeviceResponse {
 }
 
 #[derive(Serialize)]
+struct ControllerDeviceResponse {
+    address: String,
+    name: Option<String>,
+    rssi: Option<i16>,
+    kind: String,
+    side: Option<String>,
+    selected: bool,
+}
+
+#[derive(Serialize)]
+struct ControllerLinkResponse {
+    address: String,
+    name: Option<String>,
+    kind: String,
+    side: Option<String>,
+    state: String,
+    message: Option<String>,
+}
+
+#[derive(Serialize)]
 pub(crate) struct AgentResponse {
     online: bool,
     agent_id: Option<Uuid>,
@@ -191,6 +316,8 @@ pub(crate) struct AgentResponse {
     target_power_w: Option<i32>,
     trainer_address: Option<String>,
     devices: Vec<NearbyDeviceResponse>,
+    controller_devices: Vec<ControllerDeviceResponse>,
+    controllers: Vec<ControllerLinkResponse>,
     last_seen_at: Option<DateTime<Utc>>,
 }
 impl From<AgentView> for AgentResponse {
@@ -214,6 +341,36 @@ impl From<AgentView> for AgentResponse {
                             address: device.address.clone(),
                             name: device.name.clone(),
                             rssi: device.rssi,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            controller_devices: live
+                .map(|s| {
+                    s.controller_devices
+                        .iter()
+                        .map(|device| ControllerDeviceResponse {
+                            address: device.address.clone(),
+                            name: device.name.clone(),
+                            rssi: device.rssi,
+                            kind: device.kind.clone(),
+                            side: device.side.clone(),
+                            selected: device.selected,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            controllers: live
+                .map(|s| {
+                    s.controllers
+                        .iter()
+                        .map(|link| ControllerLinkResponse {
+                            address: link.address.clone(),
+                            name: link.name.clone(),
+                            kind: link.kind.clone(),
+                            side: link.side.clone(),
+                            state: link.state.clone(),
+                            message: link.message.clone(),
                         })
                         .collect()
                 })

@@ -188,6 +188,8 @@ async fn heartbeat_is_validated_and_reported_while_fresh() {
     assert_eq!(after["connection_state"], "streaming");
     assert_eq!(after["power_range_w"], json!([0, 1500]));
     assert_eq!(after["devices"], json!([]));
+    assert_eq!(after["controller_devices"], json!([]));
+    assert_eq!(after["controllers"], json!([]));
     assert!(after["trainer_address"].is_null());
     for invalid in [
         json!({"agent_id":Uuid::new_v4(),"connection_state":"dancing","session_id":null,"erg_supported":false,"power_range_w":null,"target_power_w":null}),
@@ -246,6 +248,67 @@ async fn connect_carries_the_selected_address_and_scan_results_ride_on_status() 
     let (_, after) = call(&app, TOKEN, "GET", "/api/v1/agent/status", None).await;
     assert_eq!(after["trainer_address"], "AA:BB:CC:DD:EE:FF");
     assert_eq!(after["devices"][0]["name"], "D500");
+    assert_eq!(after["controllers"], json!([]));
+}
+
+#[tokio::test]
+async fn controller_commands_are_addressless_and_status_keeps_play_sides() {
+    let app = app().router;
+    let member = support::member_token(&app).await;
+    for kind in [
+        "scan_controllers",
+        "connect_controller",
+        "disconnect_controller",
+    ] {
+        let (status, command) = call(
+            &app,
+            &member,
+            "POST",
+            "/api/v1/agent/commands",
+            Some(json!({"kind": kind})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(command["kind"], kind);
+        assert!(command["address"].is_null());
+    }
+    let beat = json!({
+        "agent_id": Uuid::new_v4(),
+        "connection_state": "streaming",
+        "session_id": null,
+        "erg_supported": true,
+        "power_range_w": [0, 1500],
+        "target_power_w": null,
+        "controller_devices": [
+            {"address":"aa:bb:cc:dd:ee:01","name":"Zwift Play","rssi":-40,"kind":"play","side":"left","selected":true},
+            {"address":"not-a-mac","name":"Zwift Play","rssi":-40,"kind":"play","side":"left","selected":true},
+            {"address":"aa:bb:cc:dd:ee:02","name":"Zwift Click","rssi":-55,"kind":"click","side":"left","selected":false}
+        ],
+        "controllers": [
+            {"address":"aa:bb:cc:dd:ee:01","name":"Zwift Play","kind":"play","side":"left","state":"connected","message":null},
+            {"address":"aa:bb:cc:dd:ee:03","name":"Zwift Play","kind":"play","side":"right","state":"dancing","message":"nope"},
+            {"address":"aa:bb:cc:dd:ee:04","name":"Zwift Play","kind":"play","side":"right","state":"failed","message":"controller_connect_failed"}
+        ]
+    });
+    assert_eq!(
+        call(&app, TOKEN, "PUT", "/api/v1/agent/status", Some(beat))
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, after) = call(&app, TOKEN, "GET", "/api/v1/agent/status", None).await;
+    assert_eq!(after["connection_state"], "streaming");
+    assert_eq!(after["controller_devices"].as_array().unwrap().len(), 2);
+    assert_eq!(after["controller_devices"][0]["side"], "left");
+    assert_eq!(after["controller_devices"][0]["selected"], true);
+    assert!(after["controller_devices"][1]["side"].is_null());
+    assert_eq!(after["controllers"].as_array().unwrap().len(), 2);
+    assert_eq!(after["controllers"][0]["state"], "connected");
+    assert_eq!(after["controllers"][1]["state"], "failed");
+    assert_eq!(
+        after["controllers"][1]["message"],
+        "controller_connect_failed"
+    );
 }
 
 #[tokio::test]
